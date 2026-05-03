@@ -10,7 +10,8 @@ type PlannerState = {
   setActiveExam: (examId: string) => void
   addExam: (name: string) => string
   setExamStatus: (examId: string, status: Exam['status']) => void
-  updateExam: (id: string, patch: Partial<Pick<Exam, 'name'>>) => void
+  updateExam: (id: string, patch: Partial<Pick<Exam, 'name' | 'examDate'>>) => void
+  deleteExam: (examId: string) => void
 
   subjects: Subject[]
   tasks: StudyTask[]
@@ -79,6 +80,19 @@ export const usePlannerStore = create<PlannerState>()(
         set((state) => ({
           exams: state.exams.map((e) => (e.id === id ? { ...e, ...patch } : e)),
         })),
+      deleteExam: (examId) =>
+        set((state) => {
+          const nextExams = state.exams.filter((e) => e.id !== examId)
+          const nextSubjects = state.subjects.filter((s) => s.examId !== examId)
+          const nextSubjectIds = new Set(nextSubjects.map((s) => s.id))
+          const nextTasks = state.tasks.filter((t) => t.examId !== examId && nextSubjectIds.has(t.subjectId))
+
+          let nextActiveExamId = state.activeExamId
+          if (state.activeExamId === examId) {
+            nextActiveExamId = nextExams.find((e) => e.status === 'active')?.id ?? nextExams[0]?.id ?? ''
+          }
+          return { exams: nextExams, subjects: nextSubjects, tasks: nextTasks, activeExamId: nextActiveExamId }
+        }),
       addSubject: ({ name, color }) =>
         set((state) => ({
           subjects: [
@@ -135,10 +149,21 @@ export const usePlannerStore = create<PlannerState>()(
     }),
     {
       name: 'emma-study-planner:v1',
-      version: 2,
+      version: 3,
       migrate: (persisted: any, fromVersion) => {
         if (!persisted || typeof persisted !== 'object') return seed()
-        if (fromVersion >= 2) return persisted
+        if (fromVersion >= 3) return persisted
+
+        if (fromVersion === 2) {
+          // v2 -> v3: examDate 추가
+          const exams = Array.isArray(persisted.exams)
+            ? persisted.exams.map((e: any) => ({
+                ...e,
+                examDate: typeof e.examDate === 'string' ? e.examDate : undefined,
+              }))
+            : seed().exams
+          return { ...persisted, exams }
+        }
 
         // v1(학기+시험) -> v2(시험만)
         const exams: Exam[] = Array.isArray(persisted.exams)
@@ -146,6 +171,7 @@ export const usePlannerStore = create<PlannerState>()(
               id: String(e.id),
               name: String(e.name ?? '시험'),
               status: (e.status === 'archived' ? 'archived' : 'active') as Exam['status'],
+              examDate: typeof e.examDate === 'string' ? e.examDate : undefined,
               createdAt: String(e.createdAt ?? new Date().toISOString()),
             }))
           : seed().exams

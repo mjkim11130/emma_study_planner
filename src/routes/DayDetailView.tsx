@@ -1,9 +1,9 @@
 import { format } from 'date-fns'
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { ymdToDate } from '../lib/dates'
 import { formatMinutes } from '../lib/time'
-import { Button, Card, CardHeader } from '../components/ui'
+import { Button, Card, CardHeader, Select } from '../components/ui'
 import { usePlannerStore } from '../store/usePlannerStore'
 
 function taskSortKey(t: { startTime?: string; createdAt: string }) {
@@ -19,6 +19,16 @@ export function DayDetailView() {
   const allTasks = usePlannerStore((s) => s.tasks)
   const tasks = useMemo(() => allTasks.filter((t) => t.examId === activeExamId && t.date === date), [allTasks, activeExamId, date])
   const addTask = usePlannerStore((s) => s.addTask)
+  const updateTask = usePlannerStore((s) => s.updateTask)
+
+  const unassignedTasks = useMemo(() => {
+    return allTasks
+      .filter((t) => t.examId === activeExamId && !t.date)
+      .slice()
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+  }, [allTasks, activeExamId])
+
+  const [pickUnassignedId, setPickUnassignedId] = useState('')
 
   const { completed, pending } = useMemo(() => {
     const sorted = tasks.slice().sort((a, b) => taskSortKey(a).localeCompare(taskSortKey(b)))
@@ -35,19 +45,47 @@ export function DayDetailView() {
           <Button variant="secondary" onClick={() => navigate('/calendar')}>
             ← 캘린더
           </Button>
-          <Button
-            onClick={() => {
-              const subjectId = subjects[0]?.id
-              if (!subjectId || !date) {
-                navigate('/subjects')
-                return
-              }
-              const id = addTask({ subjectId, title: '공부', date, plannedMinutes: 60, examId: activeExamId })
-              navigate(`/task/${id}`)
-            }}
-          >
-            + 일정 추가
-          </Button>
+          <div className="flex items-center gap-2">
+            {unassignedTasks.length > 0 ? (
+              <>
+                <div className="hidden w-56 md:block">
+                  <Select value={pickUnassignedId} onChange={setPickUnassignedId}>
+                    <option value="">미배치 일정 선택…</option>
+                    {unassignedTasks.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.title}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+                <Button
+                  variant="secondary"
+                  disabled={!pickUnassignedId}
+                  onClick={() => {
+                    if (!pickUnassignedId) return
+                    updateTask(pickUnassignedId, { date })
+                    setPickUnassignedId('')
+                  }}
+                >
+                  미배치 추가
+                </Button>
+              </>
+            ) : null}
+
+            <Button
+              onClick={() => {
+                const subjectId = subjects.find((s) => s.examId === activeExamId)?.id ?? subjects[0]?.id
+                if (!subjectId || !date) {
+                  navigate('/subjects')
+                  return
+                }
+                const id = addTask({ subjectId, title: '공부', date, plannedMinutes: 60, examId: activeExamId })
+                navigate(`/task/${id}`)
+              }}
+            >
+              + 새 일정
+            </Button>
+          </div>
         </div>
       </Card>
 

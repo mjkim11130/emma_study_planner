@@ -2,6 +2,7 @@ export type Exam = {
   id: string
   name: string // e.g. "2026-1 중간고사"
   status: 'active' | 'archived'
+  examDate?: string // YYYY-MM-DD
   createdAt: string
 }
 

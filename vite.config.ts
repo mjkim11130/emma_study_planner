@@ -3,6 +3,14 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
 // https://vite.dev/config/
-export default defineConfig({
-  plugins: [react(), tailwindcss()],
+export default defineConfig(() => {
+  // GitHub Pages(project pages) 배포 시: /<repo>/ 경로로 서빙되므로 base를 맞춰야 함.
+  // - 로컬/일반 호스팅: BASE_PATH 미설정이면 '/'
+  // - GitHub Actions: BASE_PATH='/${{ github.event.repository.name }}/'
+  const base = process.env.BASE_PATH ?? '/'
+
+  return {
+    base,
+    plugins: [react(), tailwindcss()],
+  }
 })

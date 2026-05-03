@@ -71,3 +71,29 @@ export default defineConfig([
   },
 ])
 ```
+
+## GitHub 연동 + GitHub Pages 배포(React + Vite)
+
+이 레포는 `main` 브랜치에 푸시하면, 같은 푸시로 GitHub Pages까지 자동 배포되도록 설정되어 있습니다(`.github/workflows/deploy-pages.yml`).
+
+### 1) GitHub 레포 만들고 원격 연결
+
+```bash
+git init
+git add -A
+git commit -m "init"
+git branch -M main
+git remote add origin <YOUR_GITHUB_REPO_URL>
+git push -u origin main
+```
+
+### 2) GitHub Pages 설정
+
+- GitHub 레포 → Settings → Pages
+- **Build and deployment** → Source를 **GitHub Actions**로 선택
+
+이후 `main`에 푸시할 때마다 `npm ci` → `npm run build` → Pages 배포가 자동으로 진행됩니다.
+
+### 3) 배포 URL
+
+- `https://<username>.github.io/<repo>/`

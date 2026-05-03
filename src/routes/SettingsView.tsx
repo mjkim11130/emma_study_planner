@@ -1,14 +1,17 @@
 import { useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { Button, Card, CardHeader, Input, Select } from '../components/ui'
 import { usePlannerStore } from '../store/usePlannerStore'
 
 export function SettingsView() {
   const exams = usePlannerStore((s) => s.exams)
   const activeExamId = usePlannerStore((s) => s.activeExamId)
+  const activeExam = usePlannerStore(useMemo(() => (s) => s.exams.find((e) => e.id === activeExamId), [activeExamId]))
   const setActiveExam = usePlannerStore((s) => s.setActiveExam)
   const addExam = usePlannerStore((s) => s.addExam)
   const updateExam = usePlannerStore((s) => s.updateExam)
   const setExamStatus = usePlannerStore((s) => s.setExamStatus)
+  const deleteExam = usePlannerStore((s) => s.deleteExam)
 
   const [newExamName, setNewExamName] = useState('')
   const activeExams = useMemo(() => exams.filter((e) => e.status === 'active'), [exams])
@@ -28,6 +31,14 @@ export function SettingsView() {
                 </option>
               ))}
             </Select>
+          </div>
+          <div>
+            <div className="mb-1 text-xs font-semibold text-slate-600">시험 명 수정</div>
+            <Input
+              value={activeExam?.name ?? ''}
+              onChange={(v) => updateExam(activeExamId, { name: v })}
+              placeholder="시험 이름"
+            />
           </div>
         </div>
       </Card>
@@ -52,16 +63,34 @@ export function SettingsView() {
           {activeExams.map((e) => (
             <div key={e.id} className="grid grid-cols-1 gap-2 px-4 py-3 md:grid-cols-[1fr_360px]">
               <div className="min-w-0">
-                <div className="text-sm font-semibold text-slate-900">{e.name}</div>
+                <Link to={`/exams/${e.id}`} className="text-sm font-semibold text-slate-900 hover:underline">
+                  {e.name}
+                </Link>
                 <div className="mt-1 text-xs text-slate-500">ID: {e.id}</div>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="grid grid-cols-1 gap-2 md:grid-cols-[1fr_160px_80px_80px_80px]">
                 <Input value={e.name} onChange={(v) => updateExam(e.id, { name: v })} />
+                <input
+                  type="date"
+                  value={e.examDate ?? ''}
+                  onChange={(ev) => updateExam(e.id, { examDate: ev.target.value || undefined })}
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-400"
+                />
                 <Button variant="secondary" onClick={() => setActiveExam(e.id)}>
                   선택
                 </Button>
                 <Button variant="secondary" onClick={() => setExamStatus(e.id, 'archived')}>
                   보관
+                </Button>
+                <Button
+                  variant="danger"
+                  onClick={() => {
+                    const ok = window.confirm('이 시험을 삭제할까요? 해당 시험의 과목/일정도 함께 삭제됩니다.')
+                    if (!ok) return
+                    deleteExam(e.id)
+                  }}
+                >
+                  삭제
                 </Button>
               </div>
             </div>
@@ -75,12 +104,24 @@ export function SettingsView() {
             {archivedExams.map((e) => (
               <div key={e.id} className="grid grid-cols-1 gap-2 px-4 py-3 md:grid-cols-[1fr_280px]">
                 <div className="min-w-0">
-                  <div className="text-sm font-semibold text-slate-900">{e.name}</div>
+                  <Link to={`/exams/${e.id}`} className="text-sm font-semibold text-slate-900 hover:underline">
+                    {e.name}
+                  </Link>
                   <div className="mt-1 text-xs text-slate-500">ID: {e.id}</div>
                 </div>
                 <div className="flex items-center gap-2">
                   <Button variant="secondary" onClick={() => setExamStatus(e.id, 'active')}>
                     진행중으로
+                  </Button>
+                  <Button
+                    variant="danger"
+                    onClick={() => {
+                      const ok = window.confirm('이 보관된 시험을 삭제할까요? 해당 시험의 과목/일정도 함께 삭제됩니다.')
+                      if (!ok) return
+                      deleteExam(e.id)
+                    }}
+                  >
+                    삭제
                   </Button>
                 </div>
               </div>

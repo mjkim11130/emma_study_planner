@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { Button, Card, CardHeader, Select } from '../components/ui'
+import { Button, Card, CardHeader, Input, Select } from '../components/ui'
 import { formatMinutes } from '../lib/time'
 import { usePlannerStore } from '../store/usePlannerStore'
 
@@ -221,16 +221,6 @@ function SingleSubjectDashboard({
     () => allTasks.filter((t) => t.examId === activeExamId && t.subjectId === subjectId),
     [allTasks, activeExamId, subjectId],
   )
-  const otherExamTasks = useMemo(() => {
-    const map = new Map<string, typeof tasksForActiveExam>()
-    for (const t of allTasks) {
-      if (t.subjectId !== subjectId) continue
-      const list = map.get(t.examId) ?? []
-      list.push(t)
-      map.set(t.examId, list)
-    }
-    return map
-  }, [allTasks, subjectId])
 
   const stats = useMemo(() => {
     const totalPlanned = tasksForActiveExam.reduce((acc, t) => acc + t.plannedMinutes, 0)
@@ -246,6 +236,11 @@ function SingleSubjectDashboard({
       count: tasksForActiveExam.length,
     }
   }, [tasksForActiveExam])
+
+  const [newTitle, setNewTitle] = useState('공부')
+  const [newDate, setNewDate] = useState('')
+  const [newPlanned, setNewPlanned] = useState('60')
+  const [createdToast, setCreatedToast] = useState(false)
 
   const filtered = useMemo(() => {
     const sorted = tasksForActiveExam
@@ -293,6 +288,32 @@ function SingleSubjectDashboard({
               />
               <Metric label="완료율" value={`${stats.completionRate}%`} />
             </div>
+
+            <div className="rounded-2xl border border-slate-200 bg-white p-3">
+              <div className="text-xs font-semibold text-slate-700">이 과목에 일정 추가</div>
+              <div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-[1fr_140px_120px_120px]">
+                <Input value={newTitle} onChange={setNewTitle} placeholder="일정명" />
+                <Input value={newDate} onChange={setNewDate} type="date" />
+                <Input value={newPlanned} onChange={setNewPlanned} type="number" />
+                <Button
+                  onClick={() => {
+                    const plannedMinutes = Math.max(0, Math.floor(Number(newPlanned || 0)))
+                    addTask({
+                      subjectId,
+                      title: newTitle.trim() || '공부',
+                      date: newDate.trim() ? newDate : undefined,
+                      plannedMinutes,
+                      examId: activeExamId,
+                    })
+                    setCreatedToast(true)
+                    window.setTimeout(() => setCreatedToast(false), 1600)
+                  }}
+                >
+                  추가
+                </Button>
+              </div>
+              <div className="mt-1 text-[11px] text-slate-500">날짜는 비워두면 미배치로 생성됩니다.</div>
+            </div>
           </div>
 
           <div className="h-44">
@@ -305,28 +326,11 @@ function SingleSubjectDashboard({
         </div>
       </Card>
 
-      <Card>
-        <CardHeader title="시험별 일정" subtitle="같은 과목이라도 중간/기말 일정이 완전히 분리됩니다." />
-        <div className="grid grid-cols-1 gap-3 px-4 py-4 md:grid-cols-2">
-          <ExamTaskSection
-            title="현재 시험"
-            examId={activeExamId}
-            tasks={otherExamTasks.get(activeExamId) ?? []}
-            onCreate={() => {
-              const id = addTask({ subjectId, title: '공부', plannedMinutes: 60, examId: activeExamId })
-              onNavigate(`/task/${id}`)
-            }}
-          />
-          <ExamTaskSection
-            title="다른 시험(보관/진행중 포함)"
-            examId="__other__"
-            tasks={Array.from(otherExamTasks.entries())
-              .filter(([examId]) => examId !== activeExamId)
-              .flatMap(([, ts]) => ts)}
-            onCreate={() => onNavigate('/settings')}
-          />
+      {createdToast ? (
+        <div className="pointer-events-none fixed left-1/2 top-3 z-50 -translate-x-1/2 rounded-full bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow-lg">
+          일정이 추가됐어요.
         </div>
-      </Card>
+      ) : null}
 
       <Card>
         <CardHeader title={`${subject?.name ?? '과목'} 일정`} subtitle={`${filtered.length}개`} />
@@ -359,55 +363,6 @@ function SingleSubjectDashboard({
           })}
         </div>
       </Card>
-    </div>
-  )
-}
-
-function ExamTaskSection({
-  title,
-  examId,
-  tasks,
-  onCreate,
-}: {
-  title: string
-  examId: string
-  tasks: { id: string; date: string; title: string; plannedMinutes: number; actualMinutes?: number; status: string; startTime?: string }[]
-  onCreate: () => void
-}) {
-  const sorted = useMemo(() => {
-    return tasks
-      .slice()
-      .sort((a, b) => (a.date || '9999-99-99').localeCompare(b.date || '9999-99-99') || (a.startTime ?? '99:99').localeCompare(b.startTime ?? '99:99'))
-  }, [tasks])
-
-  return (
-    <div className="rounded-2xl border border-slate-200 bg-white">
-      <div className="flex items-center justify-between border-b border-slate-100 px-3 py-3">
-        <div className="text-sm font-semibold text-slate-900">{title}</div>
-        <Button onClick={onCreate} disabled={!examId}>
-          + 일정
-        </Button>
-      </div>
-      <div className="divide-y divide-slate-100">
-        {!examId ? <div className="px-3 py-3 text-sm text-slate-500">해당 시험이 설정되지 않았어요. 설정에서 추가하세요.</div> : null}
-        {examId && sorted.length === 0 ? <div className="px-3 py-3 text-sm text-slate-500">일정이 없어요.</div> : null}
-        {sorted.map((t) => (
-          <Link key={t.id} to={`/task/${t.id}`} className="block px-3 py-2 hover:bg-slate-50">
-            <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <div className="truncate text-sm font-medium text-slate-900">{t.title}</div>
-                <div className="mt-0.5 text-[11px] text-slate-500">
-                  {t.date ? t.date : '미배치'}
-                  {t.startTime ? ` · ${t.startTime}` : ''} · 목표 {formatMinutes(t.plannedMinutes)} · {t.status === 'completed' ? '완료' : '미완료'}
-                </div>
-              </div>
-              {t.actualMinutes !== undefined ? (
-                <div className="shrink-0 text-[11px] font-semibold text-slate-700">실제 {formatMinutes(t.actualMinutes)}</div>
-              ) : null}
-            </div>
-          </Link>
-        ))}
-      </div>
     </div>
   )
 }
