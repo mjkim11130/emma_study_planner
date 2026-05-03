@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { Button, Card, CardHeader, Input, Select } from '../components/ui'
 import { usePlannerStore } from '../store/usePlannerStore'
 import { useAuth } from '../auth/AuthContext'
@@ -57,6 +57,7 @@ function saveDefaultTimelineWindow(win: TimelineWindow) {
 }
 
 export function SettingsView() {
+  const navigate = useNavigate()
   const { user } = useAuth()
   const exams = usePlannerStore((s) => s.exams)
   const activeExamId = usePlannerStore((s) => s.activeExamId)
@@ -87,6 +88,7 @@ export function SettingsView() {
             onClick={async () => {
               if (!supabaseConfigOk) return
               await getSupabase().auth.signOut()
+              navigate('/login', { replace: true })
             }}
           >
             로그아웃
