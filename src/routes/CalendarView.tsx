@@ -13,6 +13,15 @@ export function CalendarView() {
   const subjects = usePlannerStore((s) => s.subjects)
   const tasks = usePlannerStore((s) => s.tasks)
   const updateTask = usePlannerStore((s) => s.updateTask)
+  const today = useMemo(() => parseISO(todayYmd()), [])
+
+  const formatDday = (dueDate?: string) => {
+    if (!dueDate) return null
+    const end = parseISO(dueDate)
+    const diffDays = differenceInCalendarDays(end, today) // due - today
+    if (diffDays === 0) return 'D-Day'
+    return diffDays > 0 ? `D-${diffDays}` : `D+${Math.abs(diffDays)}`
+  }
 
   const [month, setMonth] = useState(() => format(new Date(), 'yyyy-MM'))
   const { days, currentMonth } = useMemo(() => monthGridDays(month), [month])
@@ -136,6 +145,7 @@ export function CalendarView() {
                 <div className="mt-1 flex flex-col gap-1">
                   {visible.map((t) => {
                     const sub = subjects.find((s) => s.id === t.subjectId)
+                    const dday = formatDday(t.dueDate)
                     return (
                       <Link
                         key={t.id}
@@ -153,7 +163,10 @@ export function CalendarView() {
                           <span className="h-2 w-2 rounded-full" style={{ background: sub?.color ?? '#94a3b8' }} />
                           <span className="truncate">{t.title}</span>
                         </div>
-                        <div className="mt-0.5 hidden text-[10px] text-slate-500 md:block">목표 {formatMinutes(t.plannedMinutes)}</div>
+                        <div className="mt-0.5 flex items-center justify-between gap-2 text-[10px] text-slate-500">
+                          <span className="hidden md:block">목표 {formatMinutes(t.plannedMinutes)}</span>
+                          {dday ? <span className="font-semibold text-slate-600">{dday}</span> : null}
+                        </div>
                       </Link>
                     )
                   })}

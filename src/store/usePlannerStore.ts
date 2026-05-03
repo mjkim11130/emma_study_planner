@@ -18,7 +18,14 @@ type PlannerState = {
   addSubject: (input: { name: string; color: string; examId?: string }) => void
   updateSubject: (id: string, patch: Partial<Pick<Subject, 'name' | 'color' | 'examId'>>) => void
   deleteSubject: (id: string) => void
-  addTask: (input: { subjectId: string; title: string; date?: string; plannedMinutes: number; examId?: string }) => string
+  addTask: (input: {
+    subjectId: string
+    title: string
+    date?: string
+    dueDate?: string
+    plannedMinutes: number
+    examId?: string
+  }) => string
   updateTask: (id: string, patch: Partial<Omit<StudyTask, 'id' | 'createdAt'>>) => void
   deleteTask: (id: string) => void
 }
@@ -115,7 +122,7 @@ export const usePlannerStore = create<PlannerState>()(
           subjects: state.subjects.filter((s) => s.id !== id),
           tasks: state.tasks.filter((t) => t.subjectId !== id),
         })),
-      addTask: ({ subjectId, title, date, plannedMinutes, examId }) => {
+      addTask: ({ subjectId, title, date, dueDate, plannedMinutes, examId }) => {
         const id = randomId('task')
         const createdAt = nowIso()
         const resolvedExamId = examId ?? get().activeExamId
@@ -125,6 +132,7 @@ export const usePlannerStore = create<PlannerState>()(
           subjectId,
           title: title.trim() || '새 일정',
           date: date ?? '',
+          dueDate: typeof dueDate === 'string' && dueDate ? dueDate : undefined,
           plannedMinutes: Math.max(0, Math.floor(plannedMinutes)),
           status: 'pending',
           createdAt,
@@ -149,10 +157,21 @@ export const usePlannerStore = create<PlannerState>()(
     }),
     {
       name: 'emma-study-planner:v1',
-      version: 3,
+      version: 4,
       migrate: (persisted: any, fromVersion) => {
         if (!persisted || typeof persisted !== 'object') return seed()
-        if (fromVersion >= 3) return persisted
+        if (fromVersion >= 4) return persisted
+
+        if (fromVersion === 3) {
+          // v3 -> v4: task dueDate(선택 마감일) 추가
+          const tasks = Array.isArray(persisted.tasks)
+            ? persisted.tasks.map((t: any) => ({
+                ...t,
+                dueDate: typeof t.dueDate === 'string' ? t.dueDate : undefined,
+              }))
+            : []
+          return { ...persisted, tasks }
+        }
 
         if (fromVersion === 2) {
           // v2 -> v3: examDate 추가
@@ -198,6 +217,7 @@ export const usePlannerStore = create<PlannerState>()(
               subjectId: String(t.subjectId),
               title: String(t.title ?? '일정'),
               date: typeof t.date === 'string' ? t.date : '',
+              dueDate: typeof t.dueDate === 'string' ? t.dueDate : undefined,
               plannedMinutes: Number(t.plannedMinutes ?? 0),
               startTime: typeof t.startTime === 'string' ? t.startTime : undefined,
               endTime: typeof t.endTime === 'string' ? t.endTime : undefined,

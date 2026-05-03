@@ -113,6 +113,14 @@ export function TaskDetailView() {
             <div className="text-xs font-semibold text-slate-600">날짜</div>
             <Input value={task.date} onChange={(v) => updateTask(task.id, { date: v })} type="date" />
           </div>
+          <div className="flex flex-col gap-2">
+            <div className="text-xs font-semibold text-slate-600">마감일 (선택 · D-day)</div>
+            <Input
+              value={task.dueDate ?? ''}
+              onChange={(v) => updateTask(task.id, { dueDate: v || undefined })}
+              type="date"
+            />
+          </div>
           <div className="flex flex-col gap-2 md:col-span-2">
             <div className="text-xs font-semibold text-slate-600">일정명</div>
             <Input value={task.title} onChange={(v) => updateTask(task.id, { title: v })} placeholder="예: 미적분 문제풀이" />

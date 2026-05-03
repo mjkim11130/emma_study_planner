@@ -22,6 +22,7 @@ export type StudyTask = {
   subjectId: string
   title: string
   date: string // YYYY-MM-DD (미배치 가능: "")
+  dueDate?: string // YYYY-MM-DD (선택: D-day 마감일)
   plannedMinutes: number
   startTime?: string // HH:mm
   endTime?: string // HH:mm
