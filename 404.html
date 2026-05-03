@@ -2,23 +2,36 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/emma_study_planner/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Redirecting…</title>
+    <title>new-project-3</title>
+    <!-- GitHub Pages에서 /<repo>/<route> 딥링크(직접진입/새로고침) 시 404가 나는 문제 해결:
+         public/404.html이 URL을 querystring으로 바꾸고, 이 스크립트가 원래 경로로 복구합니다. -->
     <script type="text/javascript">
-      // GitHub Pages SPA 딥링크 리다이렉트:
-      // /<repo>/<route> → /<repo>/?/<route> 로 바꿔서 index.html이 원래 경로로 복구하게 합니다.
       ;(function () {
-        const l = window.location
-        const segments = l.pathname.split('/')
-        const repo = segments.length > 1 ? segments[1] : ''
-        const newPath = '/' + repo + '/?/' + segments.slice(2).join('/')
-        const newUrl =
-          newPath +
-          (l.search ? '&' + l.search.slice(1).replace(/&/g, '~and~') : '') +
-          l.hash
-        l.replace(newUrl)
+        const search = window.location.search
+        if (!search.startsWith('?/')) return
+        const restored = search
+          .slice(1)
+          .split('&')
+          .map((s) => s.replace(/~and~/g, '&'))
+          .join('?')
+        // base(= /<repo>/)를 유지한 채로, 원래 라우트만 붙여서 복구
+        const basePath = window.location.pathname.endsWith('/')
+          ? window.location.pathname
+          : window.location.pathname + '/'
+        const restoredPath = restored.startsWith('/') ? restored.slice(1) : restored
+        window.history.replaceState(
+          null,
+          '',
+          basePath + restoredPath + window.location.hash,
+        )
       })()
     </script>
+    <script type="module" crossorigin src="/emma_study_planner/assets/index-DR2L5oFn.js"></script>
+    <link rel="stylesheet" crossorigin href="/emma_study_planner/assets/index-CBXIIg41.css">
   </head>
-  <body></body>
+  <body>
+    <div id="root"></div>
+  </body>
 </html>
