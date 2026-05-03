@@ -5,6 +5,20 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>new-project-3</title>
+    <!-- GitHub Pages에서 /<repo>/<route> 딥링크(직접진입/새로고침) 시 404가 나는 문제 해결:
+         public/404.html이 URL을 querystring으로 바꾸고, 이 스크립트가 원래 경로로 복구합니다. -->
+    <script type="text/javascript">
+      ;(function () {
+        const search = window.location.search
+        if (!search.startsWith('?/')) return
+        const restored = search
+          .slice(1)
+          .split('&')
+          .map((s) => s.replace(/~and~/g, '&'))
+          .join('?')
+        window.history.replaceState(null, '', restored + window.location.hash)
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>
