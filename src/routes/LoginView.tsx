@@ -83,10 +83,13 @@ export function LoginView() {
                   if (error) throw error
                   navigate('/calendar', { replace: true })
                 } else {
+                  // Supabase may create a session immediately depending on project settings.
+                  // To avoid accidentally carrying over an existing session, explicitly sign out first.
+                  await supabase.auth.signOut()
                   const { error } = await supabase.auth.signUp({ email: e, password })
                   if (error) throw error
-                  setMessage('가입이 완료되었습니다. 이제 로그인하세요.')
-                  setMode('signin')
+                  setMessage('가입이 완료되었습니다. 자동으로 로그인될 수 있어요. 계속하기를 눌러주세요.')
+                  navigate('/calendar', { replace: true })
                 }
               } catch (err) {
                 const msg = err instanceof Error ? err.message : '로그인/가입에 실패했습니다.'

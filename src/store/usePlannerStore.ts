@@ -8,6 +8,7 @@ type PlannerState = {
   exams: Exam[]
   activeExamId: string
   setActiveExam: (examId: string) => void
+  resetAll: () => void
   addExam: (name: string) => string
   setExamStatus: (examId: string, status: Exam['status']) => void
   updateExam: (id: string, patch: Partial<Pick<Exam, 'name' | 'examDate'>>) => void
@@ -74,6 +75,7 @@ export const usePlannerStore = create<PlannerState>()(
     (set, get) => ({
       ...seed(),
       setActiveExam: (examId) => set({ activeExamId: examId }),
+      resetAll: () => set(seed()),
       addExam: (name) => {
         const id = randomId('exam')
         const createdAt = nowIso()

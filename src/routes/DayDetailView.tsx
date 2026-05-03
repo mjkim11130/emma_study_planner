@@ -5,6 +5,7 @@ import { ymdToDate } from '../lib/dates'
 import { formatHmsFromSeconds } from '../lib/time'
 import { Button, Card, CardHeader } from '../components/ui'
 import { usePlannerStore } from '../store/usePlannerStore'
+import { MobileTopBar } from '../components/MobileTopBar'
 
 function hmToMinutesLocal(hm?: string) {
   if (!hm) return null
@@ -181,9 +182,32 @@ export function DayDetailView() {
 
   return (
     <div className="flex flex-col gap-3">
+      <MobileTopBar
+        title={title}
+        left={
+          <Button variant="secondary" onClick={() => navigate('/calendar')}>
+            ←
+          </Button>
+        }
+        right={
+          <Button
+            onClick={() => {
+              const subjectId = subjects.find((s) => s.examId === activeExamId)?.id ?? subjects[0]?.id
+              if (!subjectId || !date) {
+                navigate('/subjects')
+                return
+              }
+              const id = addTask({ subjectId, title: '공부', date, plannedSeconds: 60 * 60, examId: activeExamId })
+              navigate(`/task/${id}`)
+            }}
+          >
+            + 새 일정
+          </Button>
+        }
+      />
       <Card>
-        <CardHeader title={title} subtitle="목표(연한 블록) / 기록(진한 블록) 타임라인 + 10분 단위 조절" />
-        <div className="flex items-center justify-between px-4 py-3">
+        <CardHeader title={title} />
+        <div className="hidden items-center justify-between px-4 py-3 md:flex">
           <Button variant="secondary" onClick={() => navigate('/calendar')}>
             ← 캘린더
           </Button>
@@ -206,7 +230,7 @@ export function DayDetailView() {
       </Card>
 
       <Card>
-        <CardHeader title="타임라인" subtitle="블록 드래그=이동, 오른쪽 핸들 드래그=길이 조절(10분 스냅)" />
+        <CardHeader title="타임라인" />
         <div className="grid grid-cols-1 gap-3 px-4 py-4 md:grid-cols-[280px_1fr]">
           <div>
             <div className="text-xs font-semibold text-slate-600">시간 미정(이 날짜)</div>

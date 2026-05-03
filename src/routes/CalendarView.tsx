@@ -5,6 +5,7 @@ import { monthGridDays, todayYmd } from '../lib/dates'
 import { formatHmsFromSeconds } from '../lib/time'
 import { Button, Card, CardHeader } from '../components/ui'
 import { usePlannerStore } from '../store/usePlannerStore'
+import { MobileTopBar } from '../components/MobileTopBar'
 
 export function CalendarView() {
   const navigate = useNavigate()
@@ -14,6 +15,24 @@ export function CalendarView() {
   const tasks = usePlannerStore((s) => s.tasks)
   const updateTask = usePlannerStore((s) => s.updateTask)
   const today = useMemo(() => parseISO(todayYmd()), [])
+
+  const colorToRgba = (color: string, alpha: number) => {
+    const raw = color.trim()
+    const hex = raw.startsWith('#') ? raw.slice(1) : raw
+    if (/^[0-9a-fA-F]{3}$/.test(hex)) {
+      const r = parseInt(hex[0] + hex[0], 16)
+      const g = parseInt(hex[1] + hex[1], 16)
+      const b = parseInt(hex[2] + hex[2], 16)
+      return `rgba(${r}, ${g}, ${b}, ${alpha})`
+    }
+    if (/^[0-9a-fA-F]{6}$/.test(hex)) {
+      const r = parseInt(hex.slice(0, 2), 16)
+      const g = parseInt(hex.slice(2, 4), 16)
+      const b = parseInt(hex.slice(4, 6), 16)
+      return `rgba(${r}, ${g}, ${b}, ${alpha})`
+    }
+    return raw
+  }
 
   const formatDday = (dueDate?: string) => {
     if (!dueDate) return null
@@ -55,22 +74,39 @@ export function CalendarView() {
       map.set(t.date, list)
     }
     return map
-  }, [scopedTasks, tasks])
+  }, [scopedTasks])
 
   // 일정 추가는 캘린더에서 하지 않고, 대시보드/과목 디테일에서 생성 후 날짜 배치하도록 유도
 
   return (
     <div className="flex flex-col gap-3">
+      <MobileTopBar
+        title=""
+        left={
+          <Button
+            variant="secondary"
+            onClick={() => setMonth(format(addMonths(parseISO(`${month}-01`), -1), 'yyyy-MM'))}
+          >
+            이전
+          </Button>
+        }
+        center={
+          <div className="flex items-center justify-center gap-2">
+            <div className="text-sm font-semibold text-slate-900">{month}</div>
+            <Button variant="secondary" onClick={() => setMonth(format(new Date(), 'yyyy-MM'))}>
+              오늘
+            </Button>
+          </div>
+        }
+        right={
+          <Button variant="secondary" onClick={() => setMonth(format(addMonths(parseISO(`${month}-01`), 1), 'yyyy-MM'))}>
+            다음
+          </Button>
+        }
+      />
       <Card>
-        <CardHeader
-          title="Monthly Calendar View"
-          subtitle={
-            examCountdown
-              ? `시험일 ${examCountdown.examDate} · ${examCountdown.dday} · 남은 ${examCountdown.weeksLeft}주`
-              : '날짜 클릭 → Day Detail, 일정 클릭 → Task Detail'
-          }
-        />
-        <div className="flex items-center justify-between gap-2 px-4 py-3">
+        <CardHeader title="캘린더" subtitle={examCountdown ? `시험일 ${examCountdown.examDate} · ${examCountdown.dday}` : undefined} />
+        <div className="hidden items-center justify-between gap-2 px-4 py-3 md:flex">
           <div className="flex items-center gap-2">
             <Button
               variant="secondary"
@@ -95,7 +131,7 @@ export function CalendarView() {
       <Card>
         <div className="grid grid-cols-7 border-b border-slate-100 bg-slate-50 text-xs font-medium text-slate-600">
           {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d) => (
-            <div key={d} className="px-2 py-2">
+            <div key={d} className="px-1 py-2 md:px-2">
               {d}
             </div>
           ))}
@@ -131,7 +167,9 @@ export function CalendarView() {
                   if (taskId) updateTask(taskId, { date: ymd })
                   setDragOverDate(null)
                 }}
-                className={`min-h-[108px] cursor-pointer border-b border-r border-slate-100 p-2 ${isCurrentMonth ? 'bg-white' : 'bg-slate-50'} ${
+                className={`min-h-[92px] cursor-pointer border-b border-r border-slate-100 p-1.5 md:min-h-[108px] md:p-2 ${
+                  isCurrentMonth ? 'bg-white' : 'bg-slate-50'
+                } ${
                   isToday ? 'ring-1 ring-slate-300' : ''
                 } ${dragOverDate === ymd ? 'outline outline-2 outline-slate-400' : ''}`}
                 aria-label={`${ymd} 일간 기록 보기`}
@@ -157,13 +195,16 @@ export function CalendarView() {
                           e.dataTransfer.effectAllowed = 'move'
                         }}
                         onDragEnd={() => setDragOverDate(null)}
-                        className="rounded-lg border border-slate-100 bg-slate-50 px-2 py-1 text-left text-[11px] text-slate-800 hover:bg-slate-100 active:cursor-grabbing"
+                        className="-mx-1.5 block border border-slate-200 px-1.5 py-1 text-left text-[10px] leading-snug text-slate-900 hover:brightness-95 active:cursor-grabbing md:-mx-2 md:px-2"
+                        style={{
+                          background: colorToRgba(sub?.color ?? '#94a3b8', 0.18),
+                          borderColor: colorToRgba(sub?.color ?? '#94a3b8', 0.35),
+                        }}
                       >
                         <div className="flex items-center gap-1">
-                          <span className="h-2 w-2 rounded-full" style={{ background: sub?.color ?? '#94a3b8' }} />
-                          <span className="truncate">{t.title}</span>
+                          <span className="line-clamp-2 break-words">{t.title}</span>
                         </div>
-                        <div className="mt-0.5 flex items-center justify-between gap-2 text-[10px] text-slate-500">
+                        <div className="mt-0.5 flex items-center justify-between gap-2 text-[9px] text-slate-600">
                           <span className="hidden md:block">목표 {formatHmsFromSeconds(t.plannedSeconds)}</span>
                           {dday ? <span className="font-semibold text-slate-600">{dday}</span> : null}
                         </div>
@@ -216,12 +257,15 @@ export function CalendarView() {
                       e.dataTransfer.effectAllowed = 'move'
                     }}
                     onDragEnd={() => setDragOverDate(null)}
-                    className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 shadow-sm hover:bg-slate-50 active:cursor-grabbing"
+                    className="inline-flex items-center gap-2 rounded-full border px-3 py-2 text-[12px] text-slate-900 shadow-sm hover:brightness-95 active:cursor-grabbing"
+                    style={{
+                      background: colorToRgba(sub?.color ?? '#94a3b8', 0.18),
+                      borderColor: colorToRgba(sub?.color ?? '#94a3b8', 0.35),
+                    }}
                     title="드래그해서 날짜에 배치"
                   >
-                    <span className="h-2.5 w-2.5 rounded-full" style={{ background: sub?.color ?? '#94a3b8' }} />
                     <span className="max-w-[220px] truncate">{t.title}</span>
-                    <span className="text-[11px] text-slate-500">({formatHmsFromSeconds(t.plannedSeconds)})</span>
+                    <span className="text-[11px] text-slate-700">({formatHmsFromSeconds(t.plannedSeconds)})</span>
                   </Link>
                 )
               })}

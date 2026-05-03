@@ -8,9 +8,13 @@ export default defineConfig(() => {
   // - 로컬/일반 호스팅: BASE_PATH 미설정이면 '/'
   // - GitHub Actions: BASE_PATH='/${{ github.event.repository.name }}/'
   const base = process.env.BASE_PATH ?? '/'
+  const buildId = process.env.BUILD_ID ?? new Date().toISOString()
 
   return {
     base,
+    define: {
+      __BUILD_ID__: JSON.stringify(buildId),
+    },
     plugins: [react(), tailwindcss()],
   }
 })

@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Button, Card, CardHeader, Input } from '../components/ui'
 import { usePlannerStore } from '../store/usePlannerStore'
+import { MobileTopBar } from '../components/MobileTopBar'
 
 function colorCandidates() {
   return ['#2563eb', '#16a34a', '#f97316', '#dc2626', '#7c3aed', '#0891b2', '#334155']
@@ -30,9 +31,9 @@ export function SubjectManagerView() {
 
   return (
     <div className="flex flex-col gap-3">
+      <MobileTopBar title="과목 관리" />
       <Card>
-        <CardHeader title="Subject Manager" subtitle="학기별 과목을 설정/관리합니다." />
-        <div className="px-4 pt-3 text-xs text-slate-600">현재 선택된 시험의 과목만 보이고, 새 과목도 그 시험에 추가됩니다.</div>
+        <CardHeader title="과목" />
         <div className="grid grid-cols-1 gap-2 px-4 py-3 md:grid-cols-[1fr_160px_100px]">
           <Input value={name} onChange={setName} placeholder="과목명 (예: 수학)" />
           <div className="flex items-center gap-2">

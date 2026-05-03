@@ -4,6 +4,7 @@ import { Button, Card, CardHeader, Input, Select } from '../components/ui'
 import { usePlannerStore } from '../store/usePlannerStore'
 import { useAuth } from '../auth/AuthContext'
 import { getSupabase, supabaseConfigOk } from '../lib/supabaseClient'
+import { MobileTopBar } from '../components/MobileTopBar'
 
 function hmToMinutesLocal(hm?: string) {
   if (!hm) return null
@@ -67,6 +68,26 @@ export function SettingsView() {
   const updateExam = usePlannerStore((s) => s.updateExam)
   const setExamStatus = usePlannerStore((s) => s.setExamStatus)
   const deleteExam = usePlannerStore((s) => s.deleteExam)
+  const resetAll = usePlannerStore((s) => s.resetAll)
+
+  const debug = useMemo(() => {
+    const lastUserId = (() => {
+      try {
+        return window.localStorage.getItem('emma-study-planner:lastUserId')
+      } catch {
+        return null
+      }
+    })()
+    const hasPlannerLocal = (() => {
+      try {
+        return window.localStorage.getItem('emma-study-planner:v1') !== null
+      } catch {
+        return null
+      }
+    })()
+    return { lastUserId, hasPlannerLocal }
+  }, [])
+  const buildId = (globalThis as any).__BUILD_ID__ as string | undefined
 
   const [newExamName, setNewExamName] = useState('')
   const activeExams = useMemo(() => exams.filter((e) => e.status === 'active'), [exams])
@@ -79,25 +100,59 @@ export function SettingsView() {
 
   return (
     <div className="flex flex-col gap-3">
+      <MobileTopBar title="설정" />
       <Card>
-        <CardHeader title="계정" subtitle="로그인 상태는 브라우저에 저장됩니다." />
+        <CardHeader title="계정" />
         <div className="flex flex-col gap-2 px-4 py-3 md:flex-row md:items-center md:justify-between">
-          <div className="text-sm text-slate-700">{user?.email ?? '로그인 사용자'}</div>
-          <Button
-            variant="secondary"
-            onClick={async () => {
-              if (!supabaseConfigOk) return
-              await getSupabase().auth.signOut()
-              navigate('/login', { replace: true })
-            }}
-          >
-            로그아웃
-          </Button>
+          <div className="flex flex-col gap-1">
+            <div className="text-sm text-slate-700">{user?.email ?? '로그인 사용자'}</div>
+            <div className="text-[11px] text-slate-500">build: {buildId ?? '-'}</div>
+            <div className="text-[11px] text-slate-500">user.id: {user?.id ?? '-'}</div>
+            <div className="text-[11px] text-slate-500">lastUserId: {debug.lastUserId ?? '-'}</div>
+            <div className="text-[11px] text-slate-500">local planner cache: {String(debug.hasPlannerLocal)}</div>
+          </div>
+          <div className="flex flex-col gap-2 md:flex-row md:items-center">
+            <Button
+              variant="secondary"
+              onClick={async () => {
+                if (!supabaseConfigOk) return
+                await getSupabase().auth.signOut()
+                navigate('/login', { replace: true })
+              }}
+            >
+              로그아웃
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={async () => {
+                if (!supabaseConfigOk || !user) return
+                // 1) Reset local immediately
+                try {
+                  window.localStorage.removeItem('emma-study-planner:v1')
+                } catch {
+                  // ignore
+                }
+                resetAll()
+                // 2) Overwrite server snapshot for this account
+                const state = usePlannerStore.getState() as any
+                const data = {
+                  exams: state.exams,
+                  activeExamId: state.activeExamId,
+                  subjects: state.subjects,
+                  tasks: state.tasks,
+                }
+                await getSupabase().from('planner_state').upsert({ user_id: user.id, data })
+                navigate('/calendar', { replace: true })
+              }}
+            >
+              이 계정 데이터 초기화
+            </Button>
+          </div>
         </div>
       </Card>
 
       <Card>
-        <CardHeader title="Settings" subtitle="시험을 만들고, 진행중/보관을 관리합니다." />
+        <CardHeader title="시험" />
         <div className="grid grid-cols-1 gap-2 px-4 py-3 md:grid-cols-2">
           <div>
             <div className="mb-1 text-xs font-semibold text-slate-600">현재 시험</div>
@@ -121,7 +176,7 @@ export function SettingsView() {
       </Card>
 
       <Card>
-        <CardHeader title="Day 타임라인 기본 구간" subtitle="Day 페이지에서 처음 보이는 시간대를 기본값으로 사용합니다." />
+        <CardHeader title="Day 기본 시간대" />
         <div className="grid grid-cols-1 gap-3 px-4 py-4 md:grid-cols-[160px_160px_1fr]">
           <div>
             <div className="mb-1 text-xs font-semibold text-slate-600">기본 시작</div>

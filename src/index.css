@@ -22,6 +22,18 @@ body {
   color: rgb(15 23 42);
 }
 
+/* iOS overscroll(바운스)에서 상단에 비어보이는 영역 색상을 맞춤 */
+html {
+  background: rgb(248 250 252);
+}
+
 * {
   box-sizing: border-box;
+}
+
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
 }

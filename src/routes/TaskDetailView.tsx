@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { Button, Card, CardHeader, Input, Select } from '../components/ui'
 import { formatHmsFromSeconds } from '../lib/time'
 import { usePlannerStore } from '../store/usePlannerStore'
+import { MobileTopBar } from '../components/MobileTopBar'
 
 function clampInt(v: string) {
   const n = Math.floor(Number(v))
@@ -106,9 +107,28 @@ export function TaskDetailView() {
 
   return (
     <div className="flex flex-col gap-3">
+      <MobileTopBar
+        title="Task Detail"
+        left={
+          <Button variant="secondary" onClick={() => navigate(`/day/${task.date}`)}>
+            ←
+          </Button>
+        }
+        right={
+          <Button
+            variant="danger"
+            onClick={() => {
+              deleteTask(task.id)
+              navigate(`/day/${task.date}`)
+            }}
+          >
+            삭제
+          </Button>
+        }
+      />
       <Card>
-        <CardHeader title="Task Detail / Editor" subtitle="목표(연한 블록) + 기록(진한 블록) 함께 관리" />
-        <div className="flex items-center justify-between gap-2 px-4 py-3">
+        <CardHeader title="일정" />
+        <div className="hidden items-center justify-between gap-2 px-4 py-3 md:flex">
           <Button variant="secondary" onClick={() => navigate(`/day/${task.date}`)}>
             ← Day
           </Button>

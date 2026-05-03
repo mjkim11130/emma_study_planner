@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Button, Card, CardHeader, Input, Select } from '../components/ui'
 import { formatHmsFromSeconds } from '../lib/time'
 import { usePlannerStore } from '../store/usePlannerStore'
+import { MobileTopBar } from '../components/MobileTopBar'
 
 type Tab = 'all' | 'completed' | 'pending'
 
@@ -91,8 +92,9 @@ function AllSubjectsDashboard({
 
   return (
     <div className="flex flex-col gap-3">
+      <MobileTopBar title="대시보드" />
       <Card>
-        <CardHeader title="Dashboard (All Subjects)" subtitle="과목별 목표/실제/차이/완료율을 한 번에 확인" />
+        <CardHeader title="대시보드" />
         <div className="grid grid-cols-1 gap-2 px-4 py-3 md:grid-cols-[220px_1fr_140px_120px_120px]">
           <div>
             <div className="mb-1 text-xs font-semibold text-slate-600">과목</div>
@@ -277,8 +279,9 @@ function SingleSubjectDashboard({
 
   return (
     <div className="flex flex-col gap-3">
+      <MobileTopBar title="대시보드" />
       <Card>
-        <CardHeader title="Subject Dashboard" subtitle="현재 선택된 시험 기준 통계 + (중간/기말) 분리 리스트" />
+        <CardHeader title="대시보드" />
         <div className="grid grid-cols-1 gap-3 px-4 py-3 md:grid-cols-[1fr_260px]">
           <div className="flex flex-col gap-2">
             <div className="grid grid-cols-1 gap-2 md:grid-cols-[1fr_200px]">
