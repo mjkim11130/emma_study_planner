@@ -17,7 +17,7 @@ function NavItem({ to, label }: { to: string; label: string }) {
 
 export function AppLayout() {
   const location = useLocation()
-  const hideBottom = location.pathname.startsWith('/task/')
+  const hideBottom = location.pathname.includes('/task/')
   const exams = usePlannerStore((s) => s.exams)
   const activeExamId = usePlannerStore((s) => s.activeExamId)
   const setActiveExam = usePlannerStore((s) => s.setActiveExam)
@@ -44,10 +44,10 @@ export function AppLayout() {
             </select>
           </div>
           <div className="mt-2 flex flex-col gap-1">
-            <NavItem to="/calendar" label="캘린더" />
-            <NavItem to="/dashboard" label="대시보드" />
-            <NavItem to="/subjects" label="과목 관리" />
-            <NavItem to="/settings" label="설정" />
+            <NavItem to="calendar" label="캘린더" />
+            <NavItem to="dashboard" label="대시보드" />
+            <NavItem to="subjects" label="과목 관리" />
+            <NavItem to="settings" label="설정" />
           </div>
           <div className="mt-6 rounded-2xl bg-slate-50 p-3 text-xs text-slate-600">
             목표시간 vs 실제시간을 비교 기록하세요.
@@ -75,7 +75,7 @@ export function AppLayout() {
 
             <div className="grid grid-cols-4 gap-1">
               <NavLink
-                to="/calendar"
+                to="calendar"
               className={({ isActive }) =>
                 `rounded-xl px-3 py-2 text-center text-sm font-medium ${isActive ? 'bg-slate-900 text-white' : 'text-slate-700'}`
               }
@@ -83,7 +83,7 @@ export function AppLayout() {
               캘린더
             </NavLink>
             <NavLink
-              to="/dashboard"
+              to="dashboard"
               className={({ isActive }) =>
                 `rounded-xl px-3 py-2 text-center text-sm font-medium ${isActive ? 'bg-slate-900 text-white' : 'text-slate-700'}`
               }
@@ -91,7 +91,7 @@ export function AppLayout() {
               대시보드
             </NavLink>
               <NavLink
-                to="/subjects"
+                to="subjects"
                 className={({ isActive }) =>
                   `rounded-xl px-3 py-2 text-center text-sm font-medium ${isActive ? 'bg-slate-900 text-white' : 'text-slate-700'}`
                 }
@@ -99,7 +99,7 @@ export function AppLayout() {
                 과목
               </NavLink>
               <NavLink
-                to="/settings"
+                to="settings"
                 className={({ isActive }) =>
                   `rounded-xl px-3 py-2 text-center text-sm font-medium ${isActive ? 'bg-slate-900 text-white' : 'text-slate-700'}`
                 }
