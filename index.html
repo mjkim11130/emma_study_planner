@@ -16,10 +16,19 @@
           .split('&')
           .map((s) => s.replace(/~and~/g, '&'))
           .join('?')
-        window.history.replaceState(null, '', restored + window.location.hash)
+        // base(= /<repo>/)를 유지한 채로, 원래 라우트만 붙여서 복구
+        const basePath = window.location.pathname.endsWith('/')
+          ? window.location.pathname
+          : window.location.pathname + '/'
+        const restoredPath = restored.startsWith('/') ? restored.slice(1) : restored
+        window.history.replaceState(
+          null,
+          '',
+          basePath + restoredPath + window.location.hash,
+        )
       })()
     </script>
-    <script type="module" crossorigin src="/emma_study_planner/assets/index-Y7Q9_fa2.js"></script>
+    <script type="module" crossorigin src="/emma_study_planner/assets/index-Dk8Z39Tq.js"></script>
     <link rel="stylesheet" crossorigin href="/emma_study_planner/assets/index-uTm1zw4w.css">
   </head>
   <body>
