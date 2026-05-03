@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Button, Card, CardHeader, Input } from '../components/ui'
-import { supabase } from '../lib/supabaseClient'
+import { getSupabase, supabaseConfigOk } from '../lib/supabaseClient'
 import { useAuth } from '../auth/AuthContext'
 
 function normalizeEmail(input: string) {
@@ -36,6 +36,20 @@ export function LoginView() {
     )
   }
 
+  if (!supabaseConfigOk) {
+    return (
+      <div className="mx-auto flex w-full max-w-md flex-col gap-3 pt-8">
+        <Card>
+          <CardHeader title="설정 필요" subtitle="Supabase 환경변수가 설정되지 않았습니다." />
+          <div className="px-4 pb-4 text-sm text-slate-700">
+            GitHub Pages 배포라면 GitHub Actions Secrets에 <code>VITE_SUPABASE_URL</code>,{' '}
+            <code>VITE_SUPABASE_ANON_KEY</code>를 추가한 뒤 다시 배포하세요.
+          </div>
+        </Card>
+      </div>
+    )
+  }
+
   return (
     <div className="mx-auto flex w-full max-w-md flex-col gap-3 pt-8">
       <Card>
@@ -63,6 +77,7 @@ export function LoginView() {
               const e = normalizeEmail(email)
 
               try {
+                const supabase = getSupabase()
                 if (mode === 'signin') {
                   const { error } = await supabase.auth.signInWithPassword({ email: e, password })
                   if (error) throw error
@@ -97,4 +112,3 @@ export function LoginView() {
     </div>
   )
 }
-

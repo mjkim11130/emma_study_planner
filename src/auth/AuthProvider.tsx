@@ -1,11 +1,17 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { supabase } from '../lib/supabaseClient'
+import { getSupabase, supabaseConfigOk } from '../lib/supabaseClient'
 import { AuthContext, type AuthState } from './AuthContext'
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>({ isLoading: true, session: null, user: null })
 
   useEffect(() => {
+    if (!supabaseConfigOk) {
+      setState({ isLoading: false, session: null, user: null })
+      return
+    }
+
+    const supabase = getSupabase()
     let mounted = true
 
     supabase.auth

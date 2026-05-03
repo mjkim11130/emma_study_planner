@@ -10,9 +10,15 @@ function normalizeSupabaseUrl(url: string) {
   return withoutRest.replace(/\/+$/, '')
 }
 
-if (!supabaseUrl || !supabaseAnonKey) {
-  // eslint-disable-next-line no-console
-  console.warn('Missing Supabase env vars: VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY')
-}
+export const supabaseConfigOk = Boolean(supabaseUrl && supabaseAnonKey)
 
-export const supabase = createClient(supabaseUrl ? normalizeSupabaseUrl(supabaseUrl) : '', supabaseAnonKey ?? '')
+export const supabase = supabaseConfigOk
+  ? createClient(normalizeSupabaseUrl(supabaseUrl!), supabaseAnonKey!)
+  : null
+
+export function getSupabase() {
+  if (!supabase) {
+    throw new Error('Missing Supabase config. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.')
+  }
+  return supabase
+}

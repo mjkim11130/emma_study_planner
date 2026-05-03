@@ -114,3 +114,11 @@ VITE_SUPABASE_ANON_KEY=...
 ```bash
 npm run dev
 ```
+
+### GitHub Pages 배포 시(중요)
+
+GitHub Actions에서 빌드할 때도 Supabase 환경변수가 필요합니다.
+
+- GitHub Repo → Settings → Secrets and variables → Actions → New repository secret
+  - `VITE_SUPABASE_URL`
+  - `VITE_SUPABASE_ANON_KEY`

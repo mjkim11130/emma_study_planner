@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { Button, Card, CardHeader, Input, Select } from '../components/ui'
 import { usePlannerStore } from '../store/usePlannerStore'
 import { useAuth } from '../auth/AuthContext'
-import { supabase } from '../lib/supabaseClient'
+import { getSupabase, supabaseConfigOk } from '../lib/supabaseClient'
 
 function hmToMinutesLocal(hm?: string) {
   if (!hm) return null
@@ -85,7 +85,8 @@ export function SettingsView() {
           <Button
             variant="secondary"
             onClick={async () => {
-              await supabase.auth.signOut()
+              if (!supabaseConfigOk) return
+              await getSupabase().auth.signOut()
             }}
           >
             로그아웃
