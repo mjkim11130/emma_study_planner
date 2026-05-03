@@ -23,21 +23,29 @@ type PlannerState = {
     title: string
     date?: string
     dueDate?: string
-    plannedMinutes: number
+    plannedSeconds: number
     examId?: string
   }) => string
   updateTask: (id: string, patch: Partial<Omit<StudyTask, 'id' | 'createdAt'>>) => void
   deleteTask: (id: string) => void
 }
 
-function computeActualMinutes(startTime?: string, endTime?: string) {
+function computeActualSeconds(startTime?: string, endTime?: string) {
   if (!startTime || !endTime) return undefined
   const s = hmToMinutes(startTime)
   const e = hmToMinutes(endTime)
   if (s === null || e === null) return undefined
   const diff = e - s
   if (diff < 0) return undefined
-  return diff
+  return diff * 60
+}
+
+function isInvalidTimeRange(startTime?: string, endTime?: string) {
+  if (!startTime || !endTime) return false
+  const s = hmToMinutes(startTime)
+  const e = hmToMinutes(endTime)
+  if (s === null || e === null) return false
+  return e < s
 }
 
 function nowIso() {
@@ -122,7 +130,7 @@ export const usePlannerStore = create<PlannerState>()(
           subjects: state.subjects.filter((s) => s.id !== id),
           tasks: state.tasks.filter((t) => t.subjectId !== id),
         })),
-      addTask: ({ subjectId, title, date, dueDate, plannedMinutes, examId }) => {
+      addTask: ({ subjectId, title, date, dueDate, plannedSeconds, examId }) => {
         const id = randomId('task')
         const createdAt = nowIso()
         const resolvedExamId = examId ?? get().activeExamId
@@ -133,7 +141,7 @@ export const usePlannerStore = create<PlannerState>()(
           title: title.trim() || '새 일정',
           date: date ?? '',
           dueDate: typeof dueDate === 'string' && dueDate ? dueDate : undefined,
-          plannedMinutes: Math.max(0, Math.floor(plannedMinutes)),
+          plannedSeconds: Math.max(0, Math.floor(plannedSeconds)),
           status: 'pending',
           createdAt,
           updatedAt: createdAt,
@@ -146,21 +154,73 @@ export const usePlannerStore = create<PlannerState>()(
           tasks: state.tasks.map((t) => {
             if (t.id !== id) return t
             const next = { ...t, ...patch, updatedAt: nowIso() }
-            const actualMinutes =
-              patch.actualMinutes !== undefined ? patch.actualMinutes : computeActualMinutes(next.startTime, next.endTime)
+            const invalidActualRange = isInvalidTimeRange(next.actualStartTime, next.actualEndTime)
+            const actualSeconds = invalidActualRange
+              ? undefined
+              : patch.actualSeconds !== undefined
+                ? patch.actualSeconds
+                : computeActualSeconds(next.actualStartTime, next.actualEndTime)
             const status =
-              next.startTime && next.endTime ? 'completed' : actualMinutes !== undefined ? 'completed' : (next.status ?? 'pending')
-            return { ...next, actualMinutes, status }
+              invalidActualRange
+                ? 'pending'
+                : next.actualStartTime && next.actualEndTime
+                  ? 'completed'
+                  : actualSeconds !== undefined
+                    ? 'completed'
+                    : (next.status ?? 'pending')
+            return { ...next, actualSeconds, status }
           }),
         })),
       deleteTask: (id) => set((state) => ({ tasks: state.tasks.filter((t) => t.id !== id) })),
     }),
     {
       name: 'emma-study-planner:v1',
-      version: 4,
+      version: 6,
       migrate: (persisted: any, fromVersion) => {
         if (!persisted || typeof persisted !== 'object') return seed()
-        if (fromVersion >= 4) return persisted
+        if (fromVersion >= 6) return persisted
+
+        if (fromVersion === 5) {
+          // v5 -> v6: planned/actual 시간을 초 단위로 전환
+          const tasks = Array.isArray(persisted.tasks)
+            ? persisted.tasks.map((t: any) => {
+                const plannedSecondsRaw =
+                  typeof t.plannedSeconds === 'number'
+                    ? t.plannedSeconds
+                    : typeof t.plannedMinutes === 'number'
+                      ? t.plannedMinutes * 60
+                      : 0
+                const actualSecondsRaw =
+                  typeof t.actualSeconds === 'number'
+                    ? t.actualSeconds
+                    : typeof t.actualMinutes === 'number'
+                      ? t.actualMinutes * 60
+                      : undefined
+                const next = {
+                  ...t,
+                  plannedSeconds: Math.max(0, Math.floor(plannedSecondsRaw)),
+                  actualSeconds: actualSecondsRaw !== undefined ? Math.max(0, Math.floor(actualSecondsRaw)) : undefined,
+                }
+                delete (next as any).plannedMinutes
+                delete (next as any).actualMinutes
+                return next
+              })
+            : []
+          return { ...persisted, tasks }
+        }
+
+        if (fromVersion === 4) {
+          // v4 -> v5: 목표/기록 시간 필드 분리
+          const tasks = Array.isArray(persisted.tasks)
+            ? persisted.tasks.map((t: any) => ({
+                ...t,
+                plannedStartTime: typeof t.plannedStartTime === 'string' ? t.plannedStartTime : undefined,
+                actualStartTime: typeof t.actualStartTime === 'string' ? t.actualStartTime : typeof t.startTime === 'string' ? t.startTime : undefined,
+                actualEndTime: typeof t.actualEndTime === 'string' ? t.actualEndTime : typeof t.endTime === 'string' ? t.endTime : undefined,
+              }))
+            : []
+          return { ...persisted, tasks }
+        }
 
         if (fromVersion === 3) {
           // v3 -> v4: task dueDate(선택 마감일) 추가
@@ -218,10 +278,21 @@ export const usePlannerStore = create<PlannerState>()(
               title: String(t.title ?? '일정'),
               date: typeof t.date === 'string' ? t.date : '',
               dueDate: typeof t.dueDate === 'string' ? t.dueDate : undefined,
-              plannedMinutes: Number(t.plannedMinutes ?? 0),
-              startTime: typeof t.startTime === 'string' ? t.startTime : undefined,
-              endTime: typeof t.endTime === 'string' ? t.endTime : undefined,
-              actualMinutes: typeof t.actualMinutes === 'number' ? t.actualMinutes : undefined,
+              plannedSeconds:
+                typeof t.plannedSeconds === 'number'
+                  ? t.plannedSeconds
+                  : typeof t.plannedMinutes === 'number'
+                    ? t.plannedMinutes * 60
+                    : Number(t.plannedMinutes ?? 0) * 60,
+              plannedStartTime: typeof t.plannedStartTime === 'string' ? t.plannedStartTime : undefined,
+              actualStartTime: typeof t.actualStartTime === 'string' ? t.actualStartTime : typeof t.startTime === 'string' ? t.startTime : undefined,
+              actualEndTime: typeof t.actualEndTime === 'string' ? t.actualEndTime : typeof t.endTime === 'string' ? t.endTime : undefined,
+              actualSeconds:
+                typeof t.actualSeconds === 'number'
+                  ? t.actualSeconds
+                  : typeof t.actualMinutes === 'number'
+                    ? t.actualMinutes * 60
+                    : undefined,
               status: t.status === 'completed' ? 'completed' : 'pending',
               memo: typeof t.memo === 'string' ? t.memo : undefined,
               createdAt: String(t.createdAt ?? new Date().toISOString()),

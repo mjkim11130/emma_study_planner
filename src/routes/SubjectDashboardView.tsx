@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Button, Card, CardHeader, Input, Select } from '../components/ui'
-import { formatMinutes } from '../lib/time'
+import { formatHmsFromSeconds } from '../lib/time'
 import { usePlannerStore } from '../store/usePlannerStore'
 
 type Tab = 'all' | 'completed' | 'pending'
@@ -41,9 +41,20 @@ function AllSubjectsDashboard({
   onOpenSubject,
 }: {
   subjects: { id: string; examId: string; name: string; color: string }[]
-  allTasks: { id: string; examId: string; subjectId: string; plannedMinutes: number; actualMinutes?: number; status: string; date: string; title: string; startTime?: string }[]
+  allTasks: {
+    id: string
+    examId: string
+    subjectId: string
+    plannedSeconds: number
+    plannedStartTime?: string
+    actualSeconds?: number
+    actualStartTime?: string
+    status: string
+    date: string
+    title: string
+  }[]
   activeExamId: string
-  onCreateTask: (input: { subjectId: string; title: string; date?: string; plannedMinutes: number }) => void
+  onCreateTask: (input: { subjectId: string; title: string; date?: string; plannedSeconds: number }) => void
   onOpenSubject: (subjectId: string) => void
 }) {
   const [date, setDate] = useState('')
@@ -55,15 +66,15 @@ function AllSubjectsDashboard({
   const subjectStats = useMemo(() => {
     return scopedSubjects.map((s) => {
       const tasks = allTasks.filter((t) => t.examId === activeExamId && t.subjectId === s.id)
-      const totalPlanned = tasks.reduce((acc, t) => acc + t.plannedMinutes, 0)
-      const totalActual = tasks.reduce((acc, t) => acc + (t.actualMinutes ?? 0), 0)
+      const totalPlanned = tasks.reduce((acc, t) => acc + t.plannedSeconds, 0)
+      const totalActual = tasks.reduce((acc, t) => acc + (t.actualSeconds ?? 0), 0)
       const completedCount = tasks.filter((t) => t.status === 'completed').length
       const completionRate = tasks.length === 0 ? 0 : Math.round((completedCount / tasks.length) * 100)
       const sortedTasks = tasks
         .slice()
         .sort((a, b) => {
-          const ak = `${a.date || '9999-99-99'}_${a.startTime ?? '99:99'}_${a.title}`
-          const bk = `${b.date || '9999-99-99'}_${b.startTime ?? '99:99'}_${b.title}`
+          const ak = `${a.date || '9999-99-99'}_${a.actualStartTime ?? a.plannedStartTime ?? '99:99'}_${a.title}`
+          const bk = `${b.date || '9999-99-99'}_${b.actualStartTime ?? b.plannedStartTime ?? '99:99'}_${b.title}`
           return ak.localeCompare(bk)
         })
       return {
@@ -126,7 +137,7 @@ function AllSubjectsDashboard({
               onClick={() => {
                 if (!subjectId) return
                 const d = date.trim() ? date : undefined
-                onCreateTask({ subjectId, title, date: d, plannedMinutes: planned })
+                onCreateTask({ subjectId, title, date: d, plannedSeconds: planned * 60 })
               }}
             >
               + 일정 생성
@@ -154,11 +165,11 @@ function AllSubjectsDashboard({
               </Button>
             </div>
             <div className="grid grid-cols-2 gap-2 px-4 pb-4 md:grid-cols-4">
-              <Metric label="총 목표" value={formatMinutes(s.totalPlanned)} />
-              <Metric label="총 실제" value={formatMinutes(s.totalActual)} />
+              <Metric label="총 목표" value={formatHmsFromSeconds(s.totalPlanned)} />
+              <Metric label="총 실제" value={formatHmsFromSeconds(s.totalActual)} />
               <Metric
                 label="차이"
-                value={`${s.variance >= 0 ? '+' : ''}${formatMinutes(s.variance)}`}
+                value={`${s.variance >= 0 ? '+' : '-'}${formatHmsFromSeconds(Math.abs(s.variance))}`}
                 tone={s.variance >= 0 ? 'good' : 'bad'}
               />
               <Metric label="완료율" value={`${s.completionRate}%`} />
@@ -179,13 +190,13 @@ function AllSubjectsDashboard({
                           <div className="truncate text-sm font-medium text-slate-900">{t.title}</div>
                           <div className="mt-0.5 text-[11px] text-slate-500">
                             {t.date ? t.date : '미배치'}
-                            {t.startTime ? ` · ${t.startTime}` : ''} · 목표 {formatMinutes(t.plannedMinutes)} ·{' '}
+                            {t.actualStartTime || t.plannedStartTime ? ` · ${t.actualStartTime ?? t.plannedStartTime}` : ''} · 목표 {formatHmsFromSeconds(t.plannedSeconds)} ·{' '}
                             {t.status === 'completed' ? '완료' : '미완료'}
                           </div>
                         </div>
-                        {t.actualMinutes !== undefined ? (
+                        {t.actualSeconds !== undefined ? (
                           <div className="shrink-0 text-[11px] font-semibold text-slate-700">
-                            실제 {formatMinutes(t.actualMinutes)}
+                            실제 {formatHmsFromSeconds(t.actualSeconds)}
                           </div>
                         ) : null}
                       </div>
@@ -210,7 +221,18 @@ function SingleSubjectDashboard({
 }: {
   subjectId: string
   subjects: { id: string; examId: string; name: string; color: string }[]
-  allTasks: { id: string; examId: string; subjectId: string; plannedMinutes: number; actualMinutes?: number; status: string; date: string; title: string; startTime?: string }[]
+  allTasks: {
+    id: string
+    examId: string
+    subjectId: string
+    plannedSeconds: number
+    plannedStartTime?: string
+    actualSeconds?: number
+    actualStartTime?: string
+    status: string
+    date: string
+    title: string
+  }[]
   activeExamId: string
   onNavigate: (path: string) => void
 }) {
@@ -223,8 +245,8 @@ function SingleSubjectDashboard({
   )
 
   const stats = useMemo(() => {
-    const totalPlanned = tasksForActiveExam.reduce((acc, t) => acc + t.plannedMinutes, 0)
-    const totalActual = tasksForActiveExam.reduce((acc, t) => acc + (t.actualMinutes ?? 0), 0)
+    const totalPlanned = tasksForActiveExam.reduce((acc, t) => acc + t.plannedSeconds, 0)
+    const totalActual = tasksForActiveExam.reduce((acc, t) => acc + (t.actualSeconds ?? 0), 0)
     const completedCount = tasksForActiveExam.filter((t) => t.status === 'completed').length
     const completionRate = tasksForActiveExam.length === 0 ? 0 : Math.round((completedCount / tasksForActiveExam.length) * 100)
     return {
@@ -245,7 +267,9 @@ function SingleSubjectDashboard({
   const filtered = useMemo(() => {
     const sorted = tasksForActiveExam
       .slice()
-      .sort((a, b) => (a.date + (a.startTime ?? '99:99')).localeCompare(b.date + (b.startTime ?? '99:99')))
+      .sort((a, b) =>
+        (a.date + (a.actualStartTime ?? a.plannedStartTime ?? '99:99')).localeCompare(b.date + (b.actualStartTime ?? b.plannedStartTime ?? '99:99')),
+      )
     if (tab === 'completed') return sorted.filter((t) => t.status === 'completed')
     if (tab === 'pending') return sorted.filter((t) => t.status !== 'completed')
     return sorted
@@ -279,11 +303,11 @@ function SingleSubjectDashboard({
             </div>
 
             <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-              <Metric label="총 목표" value={formatMinutes(stats.totalPlanned)} />
-              <Metric label="총 실제" value={formatMinutes(stats.totalActual)} />
+              <Metric label="총 목표" value={formatHmsFromSeconds(stats.totalPlanned)} />
+              <Metric label="총 실제" value={formatHmsFromSeconds(stats.totalActual)} />
               <Metric
                 label="차이"
-                value={`${stats.variance >= 0 ? '+' : ''}${formatMinutes(stats.variance)}`}
+                value={`${stats.variance >= 0 ? '+' : '-'}${formatHmsFromSeconds(Math.abs(stats.variance))}`}
                 tone={stats.variance >= 0 ? 'good' : 'bad'}
               />
               <Metric label="완료율" value={`${stats.completionRate}%`} />
@@ -302,7 +326,7 @@ function SingleSubjectDashboard({
                       subjectId,
                       title: newTitle.trim() || '공부',
                       date: newDate.trim() ? newDate : undefined,
-                      plannedMinutes,
+                      plannedSeconds: plannedMinutes * 60,
                       examId: activeExamId,
                     })
                     setCreatedToast(true)
@@ -337,7 +361,7 @@ function SingleSubjectDashboard({
         <div className="divide-y divide-slate-100">
           {filtered.length === 0 ? <div className="px-4 py-4 text-sm text-slate-500">일정이 없어요.</div> : null}
           {filtered.map((t) => {
-            const variance = (t.actualMinutes ?? 0) - t.plannedMinutes
+            const variance = (t.actualSeconds ?? 0) - t.plannedSeconds
             return (
               <Link key={t.id} to={`/task/${t.id}`} className="block px-4 py-3 hover:bg-slate-50">
                 <div className="flex items-center justify-between gap-3">
@@ -346,15 +370,15 @@ function SingleSubjectDashboard({
                       {t.date} · {t.title}
                     </div>
                     <div className="mt-1 text-xs text-slate-500">
-                      목표 {formatMinutes(t.plannedMinutes)}
-                      {t.actualMinutes !== undefined ? ` / 실제 ${formatMinutes(t.actualMinutes)}` : ''} ·{' '}
+                      목표 {formatHmsFromSeconds(t.plannedSeconds)}
+                      {t.actualSeconds !== undefined ? ` / 실제 ${formatHmsFromSeconds(t.actualSeconds)}` : ''} ·{' '}
                       {t.status === 'completed' ? '완료' : '미완료'}
                     </div>
                   </div>
-                  {t.actualMinutes !== undefined ? (
+                  {t.actualSeconds !== undefined ? (
                     <div className={`shrink-0 text-xs font-semibold ${variance >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                      {variance >= 0 ? '+' : ''}
-                      {variance}m
+                      {variance >= 0 ? '+' : '-'}
+                      {formatHmsFromSeconds(Math.abs(variance))}
                     </div>
                   ) : null}
                 </div>

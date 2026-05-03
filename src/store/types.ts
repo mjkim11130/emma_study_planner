@@ -23,10 +23,12 @@ export type StudyTask = {
   title: string
   date: string // YYYY-MM-DD (미배치 가능: "")
   dueDate?: string // YYYY-MM-DD (선택: D-day 마감일)
-  plannedMinutes: number
-  startTime?: string // HH:mm
-  endTime?: string // HH:mm
-  actualMinutes?: number
+  plannedStartTime?: string // HH:mm (목표 시작시간)
+  plannedSeconds: number // 목표 소요시간(초)
+
+  actualStartTime?: string // HH:mm (기록 시작시간)
+  actualEndTime?: string // HH:mm (기록 종료시간)
+  actualSeconds?: number // 실제 소요시간(초)
   status: StudyTaskStatus
   memo?: string
   createdAt: string

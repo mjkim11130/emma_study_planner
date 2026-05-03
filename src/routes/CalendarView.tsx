@@ -2,7 +2,7 @@ import { addMonths, differenceInCalendarDays, format, parseISO } from 'date-fns'
 import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { monthGridDays, todayYmd } from '../lib/dates'
-import { formatMinutes } from '../lib/time'
+import { formatHmsFromSeconds } from '../lib/time'
 import { Button, Card, CardHeader } from '../components/ui'
 import { usePlannerStore } from '../store/usePlannerStore'
 
@@ -164,7 +164,7 @@ export function CalendarView() {
                           <span className="truncate">{t.title}</span>
                         </div>
                         <div className="mt-0.5 flex items-center justify-between gap-2 text-[10px] text-slate-500">
-                          <span className="hidden md:block">목표 {formatMinutes(t.plannedMinutes)}</span>
+                          <span className="hidden md:block">목표 {formatHmsFromSeconds(t.plannedSeconds)}</span>
                           {dday ? <span className="font-semibold text-slate-600">{dday}</span> : null}
                         </div>
                       </Link>
@@ -221,7 +221,7 @@ export function CalendarView() {
                   >
                     <span className="h-2.5 w-2.5 rounded-full" style={{ background: sub?.color ?? '#94a3b8' }} />
                     <span className="max-w-[220px] truncate">{t.title}</span>
-                    <span className="text-[11px] text-slate-500">({formatMinutes(t.plannedMinutes)})</span>
+                    <span className="text-[11px] text-slate-500">({formatHmsFromSeconds(t.plannedSeconds)})</span>
                   </Link>
                 )
               })}

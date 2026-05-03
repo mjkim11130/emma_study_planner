@@ -1,7 +1,58 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Button, Card, CardHeader, Input, Select } from '../components/ui'
 import { usePlannerStore } from '../store/usePlannerStore'
+
+function hmToMinutesLocal(hm?: string) {
+  if (!hm) return null
+  const m = /^(\d{1,2}):(\d{2})$/.exec(hm)
+  if (!m) return null
+  const h = Number(m[1])
+  const mm = Number(m[2])
+  if (!Number.isFinite(h) || !Number.isFinite(mm)) return null
+  if (h < 0 || h > 23 || mm < 0 || mm > 59) return null
+  return h * 60 + mm
+}
+
+function minutesToHm(min: number) {
+  const clamped = Math.max(0, Math.min(24 * 60, Math.floor(min)))
+  const h = Math.floor(clamped / 60)
+  const m = clamped % 60
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+}
+
+function snap10(min: number) {
+  return Math.max(0, Math.min(24 * 60 - 10, Math.round(min / 10) * 10))
+}
+
+type TimelineWindow = { startMin: number; endMin: number }
+
+function loadDefaultTimelineWindow(): TimelineWindow {
+  const fallback: TimelineWindow = { startMin: 9 * 60, endMin: 24 * 60 }
+  try {
+    const raw = window.localStorage.getItem('emma-study-planner:defaultTimelineWindow:v1')
+    if (!raw) return fallback
+    const parsed = JSON.parse(raw)
+    const startMin = Number(parsed?.startMin)
+    const endMin = Number(parsed?.endMin)
+    if (!Number.isFinite(startMin) || !Number.isFinite(endMin)) return fallback
+    if (endMin <= startMin) return fallback
+    return {
+      startMin: Math.max(0, Math.min(23 * 60, snap10(startMin))),
+      endMin: Math.max(10, Math.min(24 * 60, snap10(endMin))),
+    }
+  } catch {
+    return fallback
+  }
+}
+
+function saveDefaultTimelineWindow(win: TimelineWindow) {
+  try {
+    window.localStorage.setItem('emma-study-planner:defaultTimelineWindow:v1', JSON.stringify(win))
+  } catch {
+    // ignore
+  }
+}
 
 export function SettingsView() {
   const exams = usePlannerStore((s) => s.exams)
@@ -16,6 +67,11 @@ export function SettingsView() {
   const [newExamName, setNewExamName] = useState('')
   const activeExams = useMemo(() => exams.filter((e) => e.status === 'active'), [exams])
   const archivedExams = useMemo(() => exams.filter((e) => e.status === 'archived'), [exams])
+
+  const [defaultTimelineWindow, setDefaultTimelineWindow] = useState<TimelineWindow>(() => loadDefaultTimelineWindow())
+  useEffect(() => {
+    saveDefaultTimelineWindow(defaultTimelineWindow)
+  }, [defaultTimelineWindow])
 
   return (
     <div className="flex flex-col gap-3">
@@ -39,6 +95,44 @@ export function SettingsView() {
               onChange={(v) => updateExam(activeExamId, { name: v })}
               placeholder="시험 이름"
             />
+          </div>
+        </div>
+      </Card>
+
+      <Card>
+        <CardHeader title="Day 타임라인 기본 구간" subtitle="Day 페이지에서 처음 보이는 시간대를 기본값으로 사용합니다." />
+        <div className="grid grid-cols-1 gap-3 px-4 py-4 md:grid-cols-[160px_160px_1fr]">
+          <div>
+            <div className="mb-1 text-xs font-semibold text-slate-600">기본 시작</div>
+            <input
+              type="time"
+              value={minutesToHm(defaultTimelineWindow.startMin)}
+              onChange={(e) => {
+                const m = hmToMinutesLocal(e.target.value)
+                if (m === null) return
+                const startMin = snap10(m)
+                const endMin = Math.max(startMin + 10, defaultTimelineWindow.endMin)
+                setDefaultTimelineWindow({ startMin, endMin })
+              }}
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-400"
+            />
+          </div>
+          <div>
+            <div className="mb-1 text-xs font-semibold text-slate-600">기본 종료</div>
+            <input
+              type="time"
+              value={minutesToHm(Math.max(defaultTimelineWindow.startMin + 10, defaultTimelineWindow.endMin))}
+              onChange={(e) => {
+                const m = hmToMinutesLocal(e.target.value)
+                if (m === null) return
+                const endMin = Math.max(defaultTimelineWindow.startMin + 10, snap10(m))
+                setDefaultTimelineWindow({ startMin: defaultTimelineWindow.startMin, endMin })
+              }}
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-400"
+            />
+          </div>
+          <div className="text-sm text-slate-600 md:self-end">
+            기본값: <span className="font-semibold">09:00 ~ 24:00</span> (날짜별로는 Day 페이지에서 별도 설정 가능)
           </div>
         </div>
       </Card>

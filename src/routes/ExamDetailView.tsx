@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Button, Card, CardHeader, Input } from '../components/ui'
-import { formatMinutes } from '../lib/time'
+import { formatHmsFromSeconds } from '../lib/time'
 import { usePlannerStore } from '../store/usePlannerStore'
 
 export function ExamDetailView() {
@@ -23,8 +23,8 @@ export function ExamDetailView() {
   const scopedTasks = useMemo(() => tasks.filter((t) => t.examId === examId && scopedSubjectIds.has(t.subjectId)), [tasks, examId, scopedSubjectIds])
 
   const stats = useMemo(() => {
-    const totalPlanned = scopedTasks.reduce((acc, t) => acc + t.plannedMinutes, 0)
-    const totalActual = scopedTasks.reduce((acc, t) => acc + (t.actualMinutes ?? 0), 0)
+    const totalPlanned = scopedTasks.reduce((acc, t) => acc + t.plannedSeconds, 0)
+    const totalActual = scopedTasks.reduce((acc, t) => acc + (t.actualSeconds ?? 0), 0)
     const completedCount = scopedTasks.filter((t) => t.status === 'completed').length
     const completionRate = scopedTasks.length === 0 ? 0 : Math.round((completedCount / scopedTasks.length) * 100)
     return { totalPlanned, totalActual, variance: totalActual - totalPlanned, completionRate, taskCount: scopedTasks.length }
@@ -59,11 +59,11 @@ export function ExamDetailView() {
               className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-400"
             />
             <div className="mt-2 grid grid-cols-2 gap-2">
-              <Stat label="총 목표" value={formatMinutes(stats.totalPlanned)} />
-              <Stat label="총 실제" value={formatMinutes(stats.totalActual)} />
+              <Stat label="총 목표" value={formatHmsFromSeconds(stats.totalPlanned)} />
+              <Stat label="총 실제" value={formatHmsFromSeconds(stats.totalActual)} />
               <Stat
                 label="차이"
-                value={`${stats.variance >= 0 ? '+' : ''}${formatMinutes(stats.variance)}`}
+                value={`${stats.variance >= 0 ? '+' : '-'}${formatHmsFromSeconds(Math.abs(stats.variance))}`}
                 tone={stats.variance >= 0 ? 'good' : 'bad'}
               />
               <Stat label="완료율" value={`${stats.completionRate}%`} />
@@ -124,4 +124,3 @@ function Stat({ label, value, tone }: { label: string; value: string; tone?: 'go
     </div>
   )
 }
-
