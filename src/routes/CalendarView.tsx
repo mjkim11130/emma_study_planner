@@ -131,7 +131,6 @@ export function CalendarView() {
                   <div className={`text-xs font-semibold ${isCurrentMonth ? 'text-slate-900' : 'text-slate-400'}`}>
                     {Number(ymd.slice(8, 10))}
                   </div>
-                  <div className="text-[11px] text-slate-400 md:hidden">Day</div>
                 </div>
 
                 <div className="mt-1 flex flex-col gap-1">
