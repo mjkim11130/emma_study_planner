@@ -8,15 +8,31 @@ type RemoteRow = {
   updated_at: string
 }
 
+type PlannerData = {
+  exams: unknown
+  activeExamId: unknown
+  subjects: unknown
+  tasks: unknown
+}
+
 function nowIso() {
   return new Date().toISOString()
 }
 
-function safeJsonParse<T>(input: unknown): T | null {
-  try {
-    return input as T
-  } catch {
-    return null
+function isObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function pickPlannerData(input: unknown) {
+  if (!isObject(input)) return null
+  const data = input as PlannerData
+  if (!Array.isArray(data.exams) || !Array.isArray(data.subjects) || !Array.isArray(data.tasks)) return null
+  if (typeof data.activeExamId !== 'string') return null
+  return {
+    exams: data.exams,
+    activeExamId: data.activeExamId,
+    subjects: data.subjects,
+    tasks: data.tasks,
   }
 }
 
@@ -41,18 +57,26 @@ export async function startPlannerSync(user: User): Promise<SyncHandle> {
     .maybeSingle<RemoteRow>()
 
   if (!stopped && !error && remote?.data) {
-    const next = safeJsonParse<Record<string, unknown>>(remote.data)
+    const next = pickPlannerData(remote.data)
     if (next) {
-      usePlannerStore.setState(next as any, true)
+      // IMPORTANT: don't replace the whole zustand state; it would wipe action functions.
+      // Only merge in the serializable planner data fields.
+      usePlannerStore.setState(next as any, false)
     }
   }
 
   const push = async () => {
     if (stopped) return
     const state = usePlannerStore.getState() as any
+    const data = {
+      exams: state.exams,
+      activeExamId: state.activeExamId,
+      subjects: state.subjects,
+      tasks: state.tasks,
+    }
     const payload = {
       user_id: user.id,
-      data: state,
+      data,
       updated_at: nowIso(),
     }
 
@@ -87,4 +111,3 @@ export async function startPlannerSync(user: User): Promise<SyncHandle> {
     },
   }
 }
-
