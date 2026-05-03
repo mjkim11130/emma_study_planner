@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Button, Card, CardHeader, Input, Select } from '../components/ui'
 import { usePlannerStore } from '../store/usePlannerStore'
+import { useAuth } from '../auth/AuthContext'
+import { supabase } from '../lib/supabaseClient'
 
 function hmToMinutesLocal(hm?: string) {
   if (!hm) return null
@@ -55,6 +57,7 @@ function saveDefaultTimelineWindow(win: TimelineWindow) {
 }
 
 export function SettingsView() {
+  const { user } = useAuth()
   const exams = usePlannerStore((s) => s.exams)
   const activeExamId = usePlannerStore((s) => s.activeExamId)
   const activeExam = usePlannerStore(useMemo(() => (s) => s.exams.find((e) => e.id === activeExamId), [activeExamId]))
@@ -75,6 +78,21 @@ export function SettingsView() {
 
   return (
     <div className="flex flex-col gap-3">
+      <Card>
+        <CardHeader title="계정" subtitle="로그인 상태는 브라우저에 저장됩니다." />
+        <div className="flex flex-col gap-2 px-4 py-3 md:flex-row md:items-center md:justify-between">
+          <div className="text-sm text-slate-700">{user?.email ?? '로그인 사용자'}</div>
+          <Button
+            variant="secondary"
+            onClick={async () => {
+              await supabase.auth.signOut()
+            }}
+          >
+            로그아웃
+          </Button>
+        </div>
+      </Card>
+
       <Card>
         <CardHeader title="Settings" subtitle="시험을 만들고, 진행중/보관을 관리합니다." />
         <div className="grid grid-cols-1 gap-2 px-4 py-3 md:grid-cols-2">

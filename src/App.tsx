@@ -7,21 +7,33 @@ import { SubjectManagerView } from './routes/SubjectManagerView'
 import { TaskDetailView } from './routes/TaskDetailView'
 import { SettingsView } from './routes/SettingsView'
 import { ExamDetailView } from './routes/ExamDetailView'
+import { LoginView } from './routes/LoginView'
+import { useAuth } from './auth/AuthContext'
 
 function App() {
+  const { user, isLoading } = useAuth()
+
+  if (isLoading) return null
+
   return (
     <Routes>
-      <Route element={<AppLayout />}>
-        <Route path="/" element={<Navigate to="calendar" replace />} />
-        <Route path="/calendar" element={<CalendarView />} />
-        <Route path="/day/:date" element={<DayDetailView />} />
-        <Route path="/task/:taskId" element={<TaskDetailView />} />
-        <Route path="/subjects" element={<SubjectManagerView />} />
-        <Route path="/dashboard" element={<SubjectDashboardView />} />
-        <Route path="/dashboard/:subjectId" element={<SubjectDashboardView />} />
-        <Route path="/settings" element={<SettingsView />} />
-        <Route path="/exams/:examId" element={<ExamDetailView />} />
-      </Route>
+      <Route path="/login" element={<LoginView />} />
+
+      {user ? (
+        <Route element={<AppLayout />}>
+          <Route path="/" element={<Navigate to="calendar" replace />} />
+          <Route path="/calendar" element={<CalendarView />} />
+          <Route path="/day/:date" element={<DayDetailView />} />
+          <Route path="/task/:taskId" element={<TaskDetailView />} />
+          <Route path="/subjects" element={<SubjectManagerView />} />
+          <Route path="/dashboard" element={<SubjectDashboardView />} />
+          <Route path="/dashboard/:subjectId" element={<SubjectDashboardView />} />
+          <Route path="/settings" element={<SettingsView />} />
+          <Route path="/exams/:examId" element={<ExamDetailView />} />
+        </Route>
+      ) : (
+        <Route path="*" element={<Navigate to="/login" replace />} />
+      )}
     </Routes>
   )
 }

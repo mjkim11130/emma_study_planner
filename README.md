@@ -97,3 +97,20 @@ git push -u origin main
 ### 3) 배포 URL
 
 - `https://<username>.github.io/<repo>/`
+
+## Supabase(Auth) 연동 (로그인 먼저 보이게)
+
+이 프로젝트는 Supabase Auth를 사용해서 **첫 화면을 로그인 페이지(`/login`)로 고정**하고, 로그인 세션은 브라우저에 저장되어 **다음 접속부터 자동 로그인**됩니다(로그아웃 지원).
+
+1) Supabase 프로젝트 생성 후, `.env`에 아래 값 추가
+
+```bash
+VITE_SUPABASE_URL=...
+VITE_SUPABASE_ANON_KEY=...
+```
+
+2) 개발 실행
+
+```bash
+npm run dev
+```
