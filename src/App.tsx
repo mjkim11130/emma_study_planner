@@ -17,7 +17,7 @@ function App() {
 
   return (
     <Routes>
-      <Route path="/login" element={<LoginView />} />
+      <Route path="login" element={<LoginView />} />
 
       {user ? (
         <Route element={<AppLayout />}>
@@ -32,7 +32,7 @@ function App() {
           <Route path="/exams/:examId" element={<ExamDetailView />} />
         </Route>
       ) : (
-        <Route path="*" element={<Navigate to="/login" replace />} />
+        <Route path="*" element={<Navigate to="login" replace />} />
       )}
     </Routes>
   )
