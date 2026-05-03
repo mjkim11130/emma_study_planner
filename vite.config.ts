@@ -3,11 +3,11 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
 // https://vite.dev/config/
-export default defineConfig(() => {
-  // GitHub Pages(project pages) 배포 시: /<repo>/ 경로로 서빙되므로 base를 맞춰야 함.
-  // - 로컬/일반 호스팅: BASE_PATH 미설정이면 '/'
-  // - GitHub Actions: BASE_PATH='/${{ github.event.repository.name }}/'
-  const base = process.env.BASE_PATH ?? '/'
+export default defineConfig(({ command }) => {
+  // `vite dev`(serve): 항상 '/'가 자연스럽다.
+  // `vite build`: GitHub Pages/서브패스/로컬 파일서빙까지 안전하게 상대경로('./')를 기본으로 사용.
+  // GitHub Actions에서 project pages로 배포할 땐 BASE_PATH='/${repo}/'를 주입하면 됨.
+  const base = command === 'serve' ? '/' : process.env.BASE_PATH ?? './'
 
   return {
     base,
