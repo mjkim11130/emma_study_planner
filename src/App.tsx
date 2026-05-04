@@ -23,6 +23,7 @@ function App() {
         <Route element={<AppLayout />}>
           <Route path="/" element={<Navigate to="calendar" replace />} />
           <Route path="/calendar" element={<CalendarView />} />
+          <Route path="/day" element={<Navigate to="/calendar" replace />} />
           <Route path="/day/:date" element={<DayDetailView />} />
           <Route path="/task/:taskId" element={<TaskDetailView />} />
           <Route path="/subjects" element={<SubjectManagerView />} />

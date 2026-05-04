@@ -23,3 +23,38 @@ export function formatHmsFromSeconds(totalSeconds: number) {
   if (h > 0) return `${sign}${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
   return `${sign}${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
 }
+
+export function formatRoundedDurationKoFromSeconds(totalSeconds: number) {
+  const absSeconds = Math.abs(totalSeconds)
+  const minutesRaw = absSeconds / 60
+
+  // < 1h: round to nearest 10 minutes
+  if (minutesRaw < 60) {
+    const step = minutesRaw <= 10 ? 1 : 5
+    const minutesRounded = Math.round(minutesRaw / step) * step
+    if (minutesRounded >= 60) return '1시간'
+    return `${minutesRounded}분`
+  }
+
+  // >= 1h: round to nearest 0.5 hours
+  const hoursRaw = minutesRaw / 60
+  const hoursRounded = Math.round(hoursRaw * 2) / 2
+  if (Number.isInteger(hoursRounded)) return `${hoursRounded}시간`
+  return `${hoursRounded}시간`
+}
+
+export function formatRoundedDurationShortFromSeconds(totalSeconds: number) {
+  const absSeconds = Math.abs(totalSeconds)
+  const minutesRaw = absSeconds / 60
+
+  if (minutesRaw < 60) {
+    const step = minutesRaw <= 10 ? 1 : 5
+    const minutesRounded = Math.round(minutesRaw / step) * step
+    if (minutesRounded >= 60) return '1h'
+    return `${minutesRounded}m`
+  }
+
+  const hoursRaw = minutesRaw / 60
+  const hoursRounded = Math.round(hoursRaw * 2) / 2
+  return `${hoursRounded}h`
+}

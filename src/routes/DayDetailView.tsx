@@ -1,6 +1,6 @@
 import { format } from 'date-fns'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, Navigate, useNavigate, useParams } from 'react-router-dom'
 import { ymdToDate } from '../lib/dates'
 import { formatHmsFromSeconds } from '../lib/time'
 import { Button, Card, CardHeader } from '../components/ui'
@@ -102,6 +102,7 @@ export function DayDetailView() {
   const navigate = useNavigate()
   const params = useParams()
   const date = params.date ?? ''
+  if (!date) return <Navigate to="/calendar" replace />
   const activeExamId = usePlannerStore((s) => s.activeExamId)
   const subjects = usePlannerStore((s) => s.subjects)
   const allTasks = usePlannerStore((s) => s.tasks)

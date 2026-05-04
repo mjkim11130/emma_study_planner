@@ -1,7 +1,7 @@
 import type { PropsWithChildren } from 'react'
 
-export function Card({ children }: PropsWithChildren) {
-  return <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">{children}</div>
+export function Card({ children, className }: PropsWithChildren<{ className?: string }>) {
+  return <div className={`rounded-2xl border border-slate-200 bg-white shadow-sm ${className ?? ''}`}>{children}</div>
 }
 
 export function CardHeader({ title, subtitle }: { title: string; subtitle?: string }) {
@@ -81,4 +81,3 @@ export function Select({
     </select>
   )
 }
-
