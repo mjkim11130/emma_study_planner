@@ -1,7 +1,8 @@
 import { useMemo } from 'react'
-import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
+import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { usePlannerStore } from '../store/usePlannerStore'
 import { formatRoundedDurationKoFromSeconds } from '../lib/time'
+import { Button } from './ui'
 
 const normalizeHex = (color: string) => {
   const raw = color.trim()
@@ -58,18 +59,19 @@ function NavItem({ to, label }: { to: string; label: string }) {
 
 export function AppLayout() {
   const location = useLocation()
+  const navigate = useNavigate()
   const hideBottom = location.pathname.includes('/task/')
   const exams = usePlannerStore((s) => s.exams)
   const activeExamId = usePlannerStore((s) => s.activeExamId)
   const setActiveExam = usePlannerStore((s) => s.setActiveExam)
   const subjects = usePlannerStore((s) => s.subjects)
+  const tasks = usePlannerStore((s) => s.tasks)
+  const addTask = usePlannerStore((s) => s.addTask)
+  const updateTask = usePlannerStore((s) => s.updateTask)
 
-  const unassignedPending = usePlannerStore(
-    useMemo(
-      () => (s) =>
-        s.tasks.filter((t) => t.examId === activeExamId && t.status !== 'completed' && (!t.date || t.date === '')),
-      [activeExamId],
-    ),
+  const unassignedPending = useMemo(
+    () => tasks.filter((t) => t.examId === activeExamId && t.status !== 'completed' && (!t.date || t.date === '')),
+    [tasks, activeExamId],
   )
 
   const unassignedBySubject = useMemo(() => {
@@ -91,7 +93,7 @@ export function AppLayout() {
   return (
     <div className="h-full [--bottom-nav-h:72px]">
       <div className="grid h-full w-full grid-cols-1 md:grid-cols-[260px_1fr]">
-        <aside className="hidden border-r border-slate-200 bg-white p-3 md:block">
+        <aside className="hidden border-r border-slate-200 bg-white p-3 md:flex md:min-h-0 md:flex-col">
           <div className="px-2 py-2 text-sm font-semibold text-slate-900">엠마 스터디플래너</div>
           <div className="mt-2 rounded-2xl border border-slate-200 bg-white p-2">
             <div className="text-[11px] font-semibold text-slate-600">현재 시험</div>
@@ -119,17 +121,42 @@ export function AppLayout() {
             목표시간 vs 실제시간을 비교 기록하세요.
           </div>
 
-          <div className="mt-3 rounded-2xl border border-slate-200 bg-white">
+          <div className="mt-3 flex min-h-0 flex-1 flex-col rounded-2xl border border-slate-200 bg-white">
             <div className="flex items-center justify-between px-3 py-2">
-              <div className="text-[12px] font-semibold text-slate-900">시작 예정</div>
-              {unassignedPending.length ? (
-                <div className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-700 tabular-nums">
-                  {unassignedPending.length}
-                </div>
-              ) : null}
+              <div className="flex items-center gap-2">
+                <div className="text-[12px] font-semibold text-slate-900">시작 예정</div>
+                {unassignedPending.length ? (
+                  <div className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-700 tabular-nums">
+                    {unassignedPending.length}
+                  </div>
+                ) : null}
+              </div>
+              <Button
+                onClick={() => {
+                  const subjectId = subjects.find((s) => s.examId === activeExamId)?.id ?? subjects[0]?.id
+                  if (!subjectId) {
+                    navigate('/subjects')
+                    return
+                  }
+                  const id = addTask({ subjectId, title: '공부', plannedSeconds: 60 * 60, examId: activeExamId })
+                  navigate(`/task/${id}`)
+                }}
+              >
+                + 일정 추가
+              </Button>
             </div>
-            <div className="border-t border-slate-100 p-2">
-              <div className="max-h-[calc(100dvh-380px)] overflow-y-auto pr-1">
+            <div
+              className="min-h-0 flex-1 border-t border-slate-100 p-2"
+              onDragOver={(e) => {
+                e.preventDefault()
+              }}
+              onDrop={(e) => {
+                e.preventDefault()
+                const taskId = e.dataTransfer.getData('text/emma-task-id')
+                if (taskId) updateTask(taskId, { date: '' })
+              }}
+            >
+              <div className="h-full min-h-0 overflow-y-auto overscroll-contain pr-1">
                 <div className="space-y-2">
                   {unassignedBySubject.map((g) => {
                     const subject = subjects.find((s) => s.id === g.subjectId)
@@ -138,8 +165,8 @@ export function AppLayout() {
                         <div className="mb-1 overflow-hidden whitespace-nowrap text-[11px] font-semibold text-slate-700">
                           {truncateText(subject?.name ?? '과목', 18)}
                         </div>
-                        <div className="flex flex-col gap-1">
-                          {g.list.slice(0, 12).map((t) => {
+                        <div className="grid grid-cols-2 gap-1">
+                          {g.list.map((t) => {
                             const sub = subjects.find((s) => s.id === t.subjectId)
                             const bg = sub?.color ?? '#94a3b8'
                             const textColor = pickReadableTextColor(bg)
@@ -151,7 +178,12 @@ export function AppLayout() {
                               <Link
                                 key={t.id}
                                 to={`/task/${t.id}`}
-                                className="block rounded-[3px] px-2 py-1 text-[11px] leading-none hover:brightness-95"
+                                draggable
+                                onDragStart={(e) => {
+                                  e.dataTransfer.setData('text/emma-task-id', t.id)
+                                  e.dataTransfer.effectAllowed = 'move'
+                                }}
+                                className="block min-w-0 rounded-[3px] px-2 py-1 text-[11px] leading-none hover:brightness-95"
                                 style={{ background: bg, color: textColor }}
                               >
                                 <div className="flex items-center justify-between gap-2">
