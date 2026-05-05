@@ -1,25 +1,197 @@
 import { addDays, addMonths, differenceInCalendarDays, format, parseISO, startOfWeek } from 'date-fns'
-import { useEffect, useMemo, useRef, useState, type WheelEvent as ReactWheelEvent } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { ko } from 'date-fns/locale'
+import { useContext, useEffect, useMemo, useRef, useState, type ReactNode, type WheelEvent as ReactWheelEvent } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { todayYmd } from '../lib/dates'
 import { formatRoundedDurationKoFromSeconds, formatRoundedDurationShortFromSeconds } from '../lib/time'
 import { Button, Card } from '../components/ui'
 import { usePlannerStore } from '../store/usePlannerStore'
 import { MobileTopBar } from '../components/MobileTopBar'
+import { NewTaskSheetContext } from '../components/AppLayout'
+import { NewTaskSheet } from '../components/NewTaskSheet'
+import { TaskRecordSheet } from '../components/TaskRecordSheet'
+
+function StartPendingBubbleIcon() {
+  return (
+    <svg viewBox="0 0 64 64" aria-hidden="true" className="h-8 w-8 text-slate-800">
+      <rect x="9" y="14" width="34" height="34" rx="7" fill="#e8f1fb" />
+      <path
+        d="M18 10v8M34 10v8M9 23h34M16 30h6M26 30h6M16 38h6M26 38h6"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <circle cx="43" cy="43" r="12" fill="#ffffff" />
+      <circle
+        cx="43"
+        cy="43"
+        r="12"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="4"
+        strokeLinecap="round"
+        strokeDasharray="1.5 6.5"
+      />
+      <path
+        d="M43 37v6h5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+function formatMeridiemHm(hm?: string) {
+  if (!hm) return null
+  const match = /^(\d{1,2}):(\d{2})$/.exec(hm)
+  if (!match) return null
+  const hours24 = Number(match[1])
+  const minutes = Number(match[2])
+  if (!Number.isFinite(hours24) || !Number.isFinite(minutes)) return null
+  const meridiem = hours24 < 12 ? '오전' : '오후'
+  const hours12 = hours24 % 12 === 0 ? 12 : hours24 % 12
+  return `${meridiem} ${String(hours12).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`
+}
+
+function addSecondsToHm(hm: string, secondsToAdd: number) {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(hm)
+  if (!match) return null
+  const startSeconds = Number(match[1]) * 3600 + Number(match[2]) * 60
+  const endTotalMinutes = Math.floor((startSeconds + secondsToAdd) / 60)
+  const normalized = ((endTotalMinutes % (24 * 60)) + 24 * 60) % (24 * 60)
+  const h = Math.floor(normalized / 60)
+  const m = normalized % 60
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+}
+
+function formatTaskPreviewDate(ymd?: string) {
+  if (!ymd) return null
+  return format(parseISO(ymd), 'yyyy년 M월 d일 eeee', { locale: ko })
+}
+
+function formatDueDateLabel(ymd?: string) {
+  if (!ymd) return null
+  return `${format(parseISO(ymd), 'M월 d일')}까지 마감`
+}
+
+function formatDurationPreciseKo(totalSeconds: number) {
+  const clamped = Math.max(0, Math.floor(totalSeconds))
+  if (clamped < 60) return '1분 이내'
+  const hours = Math.floor(clamped / 3600)
+  const minutes = Math.floor((clamped % 3600) / 60)
+  const parts: string[] = []
+  if (hours > 0) parts.push(`${hours}시간`)
+  if (minutes > 0) parts.push(`${minutes}분`)
+  if (parts.length === 0) {
+    parts.push('0분')
+  }
+  return `${parts.join(' ')}동안`
+}
+
+function formatDurationGraphKo(totalSeconds: number) {
+  const clamped = Math.max(0, Math.floor(totalSeconds))
+  if (clamped < 60) return '1분 이내'
+  const hours = Math.floor(clamped / 3600)
+  const minutes = Math.floor((clamped % 3600) / 60)
+  const parts: string[] = []
+  if (hours > 0) parts.push(`${hours}시간`)
+  if (minutes > 0) parts.push(`${minutes}분`)
+  if (parts.length === 0) parts.push('0분')
+  return parts.join(' ')
+}
+
+function buildTimeSummaryNode({
+  start,
+  end,
+  durationSeconds,
+}: {
+  start?: string | null
+  end?: string | null
+  durationSeconds?: number | null
+}) {
+  const rangeText = start ? (end ? `${formatMeridiemHm(start)}부터 ${formatMeridiemHm(end)}까지` : `${formatMeridiemHm(start)}부터`) : ''
+  const durationText = typeof durationSeconds === 'number' ? formatDurationPreciseKo(durationSeconds) : ''
+
+  if (rangeText && !end && !durationText) {
+    return (
+      <>
+        <strong>
+          {rangeText} 시작
+        </strong>
+      </>
+    )
+  }
+
+  if (rangeText && durationText) {
+    return (
+      <>
+        {rangeText} <strong>{durationText}</strong>
+      </>
+    )
+  }
+
+  if (durationText) return <strong>{durationText}</strong>
+  return rangeText
+}
+
+function CompareRail({
+  goalLabel,
+  actualLabel,
+  deltaLabel,
+  goalSeconds,
+  actualSeconds,
+}: {
+  goalLabel: string
+  actualLabel: string
+  deltaLabel: string
+  goalSeconds: number
+  actualSeconds: number
+}) {
+  const maxSeconds = Math.max(goalSeconds, actualSeconds, 1)
+  const goalWidth = `${(goalSeconds / maxSeconds) * 100}%`
+  const actualWidth = `${(actualSeconds / maxSeconds) * 100}%`
+  return (
+    <div className="flex flex-col gap-2.5 py-1">
+      <div className="grid grid-cols-[46px_minmax(0,1fr)_98px] items-center gap-3">
+        <span className="text-sm font-semibold text-slate-400">목표</span>
+        <div className="h-3.5 overflow-hidden">
+          <div className="h-full rounded-full bg-slate-300" style={{ width: goalWidth }} />
+        </div>
+        <span className="text-right text-[15px] font-semibold tabular-nums text-slate-500">{goalLabel}</span>
+      </div>
+      <div className="grid grid-cols-[46px_minmax(0,1fr)_98px] items-center gap-3">
+        <span className="text-sm font-semibold text-slate-900">기록</span>
+        <div className="h-3.5 overflow-hidden">
+          <div className="h-full rounded-full bg-slate-900" style={{ width: actualWidth }} />
+        </div>
+        <span className="text-right text-[15px] font-bold tabular-nums text-slate-900">{actualLabel}</span>
+      </div>
+      <div className="pt-1 text-center text-base font-semibold text-slate-700">{deltaLabel}</div>
+    </div>
+  )
+}
 
 export function CalendarView() {
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const newTaskSheet = useContext(NewTaskSheetContext)
   const activeExamId = usePlannerStore((s) => s.activeExamId)
   const activeExam = usePlannerStore(useMemo(() => (s) => s.exams.find((e) => e.id === activeExamId), [activeExamId]))
   const subjects = usePlannerStore((s) => s.subjects)
   const tasks = usePlannerStore((s) => s.tasks)
-  const addTask = usePlannerStore((s) => s.addTask)
   const updateTask = usePlannerStore((s) => s.updateTask)
   const today = useMemo(() => parseISO(todayYmd()), [])
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const weekSectionRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const weekdayHeaderRef = useRef<HTMLDivElement | null>(null)
   const [startOpen, setStartOpen] = useState(true)
+  const [editTaskId, setEditTaskId] = useState<string | null>(null)
+  const [recordTaskId, setRecordTaskId] = useState<string | null>(null)
   const [startPopupEverOpened, setStartPopupEverOpened] = useState(false)
   const [startDock, setStartDock] = useState<{ v: 'top' | 'bottom'; h: 'right' }>({ v: 'bottom', h: 'right' })
   const [topDockY, setTopDockY] = useState<number>(() => 64)
@@ -121,6 +293,7 @@ export function CalendarView() {
   }, [activeExam])
 
   const scopedTasks = useMemo(() => tasks.filter((t) => t.examId === activeExamId && t.date), [tasks, activeExamId])
+  const previewTaskId = searchParams.get('previewTaskId')
   const unassignedBySubject = useMemo(() => {
     const items = tasks.filter((t) => t.examId === activeExamId && !t.date && t.status !== 'completed').slice()
     const bySubject = new Map<string, typeof items>()
@@ -148,6 +321,113 @@ export function CalendarView() {
     }
     return map
   }, [scopedTasks])
+
+  const previewTask = useMemo(() => tasks.find((task) => task.id === previewTaskId) ?? null, [tasks, previewTaskId])
+  const editTask = useMemo(() => tasks.find((task) => task.id === editTaskId) ?? null, [tasks, editTaskId])
+  const openPreviewTask = (taskId: string) => {
+    const next = new URLSearchParams(searchParams)
+    next.set('previewTaskId', taskId)
+    setSearchParams(next, { replace: true })
+  }
+  const closePreviewTask = () => {
+    const next = new URLSearchParams(searchParams)
+    next.delete('previewTaskId')
+    setSearchParams(next, { replace: true })
+  }
+  const previewSubject = useMemo(
+    () => subjects.find((subject) => subject.id === previewTask?.subjectId) ?? null,
+    [subjects, previewTask?.subjectId],
+  )
+  const previewPlannedEnd = useMemo(() => {
+    if (!previewTask?.plannedStartTime || previewTask.plannedSeconds <= 0) return null
+    return addSecondsToHm(previewTask.plannedStartTime, previewTask.plannedSeconds)
+  }, [previewTask?.plannedStartTime, previewTask?.plannedSeconds])
+  const previewActualSummary = useMemo(() => {
+    if (!previewTask) return null
+    if (typeof previewTask.actualSeconds !== 'number') return null
+    if (previewTask.plannedSeconds > 0) {
+      const variance = previewTask.actualSeconds - previewTask.plannedSeconds
+      if (variance < 0) {
+        return {
+          kind: 'compare' as const,
+          goalLabel: formatDurationGraphKo(previewTask.plannedSeconds),
+          actualLabel: formatDurationGraphKo(previewTask.actualSeconds),
+          goalSeconds: previewTask.plannedSeconds,
+          actualSeconds: previewTask.actualSeconds,
+          deltaLabel: `${formatDurationGraphKo(Math.abs(variance))} 일찍 완료`,
+        }
+      }
+      if (variance > 0) {
+        return {
+          kind: 'compare' as const,
+          goalLabel: formatDurationGraphKo(previewTask.plannedSeconds),
+          actualLabel: formatDurationGraphKo(previewTask.actualSeconds),
+          goalSeconds: previewTask.plannedSeconds,
+          actualSeconds: previewTask.actualSeconds,
+          deltaLabel: `${formatDurationGraphKo(Math.abs(variance))} 오래 지속`,
+        }
+      }
+      return {
+        kind: 'compare' as const,
+        goalLabel: formatDurationGraphKo(previewTask.plannedSeconds),
+        actualLabel: formatDurationGraphKo(previewTask.actualSeconds),
+        goalSeconds: previewTask.plannedSeconds,
+        actualSeconds: previewTask.actualSeconds,
+        deltaLabel: '딱 맞게 완료',
+      }
+    }
+    return null
+  }, [previewTask])
+  const previewHeadlineTimes = useMemo(() => {
+    if (!previewTask) return []
+    const hasCompare = typeof previewTask.actualSeconds === 'number' && previewTask.plannedSeconds > 0
+    const items: Array<{ kind: '목표' | '기록'; badge: string; text: ReactNode; key: string }> = []
+
+    if (previewTask.plannedStartTime || previewTask.plannedSeconds > 0) {
+      const plannedText = hasCompare
+        ? buildTimeSummaryNode({ start: previewTask.plannedStartTime, end: previewPlannedEnd, durationSeconds: null })
+        : buildTimeSummaryNode({
+            start: previewTask.plannedStartTime,
+            end: previewPlannedEnd,
+            durationSeconds: previewTask.plannedSeconds > 0 ? previewTask.plannedSeconds : null,
+          })
+      items.push({
+        kind: '목표',
+        badge: '목표',
+        text: plannedText,
+        key: 'goal',
+      })
+    }
+
+    if (previewTask.actualStartTime || typeof previewTask.actualSeconds === 'number') {
+      const actualText = hasCompare
+        ? buildTimeSummaryNode({ start: previewTask.actualStartTime, end: previewTask.actualEndTime, durationSeconds: null })
+        : buildTimeSummaryNode({
+            start: previewTask.actualStartTime,
+            end: previewTask.actualEndTime,
+            durationSeconds: typeof previewTask.actualSeconds === 'number' ? previewTask.actualSeconds : null,
+          })
+      items.push({
+        kind: '기록',
+        badge: '기록',
+        text: actualText,
+        key: 'actual',
+      })
+    }
+
+    if (!items.some((item) => item.kind === '기록') && previewTask.status === 'completed') {
+      items.push({
+        kind: '기록',
+        badge: '기록',
+        text: '완료 처리',
+        key: 'completed',
+      })
+    }
+
+    return items
+  }, [previewPlannedEnd, previewTask])
+  const hasPreviewMeta = Boolean(previewHeadlineTimes.length || previewTask?.dueDate)
+  const hasPreviewCompare = Boolean(previewActualSummary)
 
   // 일정 추가는 캘린더에서 하지 않고, 대시보드/과목 디테일에서 생성 후 날짜 배치하도록 유도
 
@@ -451,7 +731,7 @@ export function CalendarView() {
         }
       />
 
-      <div className="hidden md:block mt-3">
+      <div className="hidden">
         <Card>
           <div className="hidden items-center justify-between gap-2 px-4 py-3 md:flex">
             <div className="flex flex-col gap-0.5">
@@ -592,10 +872,13 @@ export function CalendarView() {
                             const titleMobile = truncateToUnits(t.title, titleMaxUnitsMobile)
                             const titleDesktop = truncateToUnits(t.title, titleMaxUnitsDesktop)
                             return (
-                              <Link
+                              <button
                                 key={t.id}
-                                to={`/task/${t.id}`}
-                                onClick={(e) => e.stopPropagation()}
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  openPreviewTask(t.id)
+                                }}
                                 draggable
                                 onDragStart={(e) => {
                                   e.dataTransfer.setData('text/emma-task-id', t.id)
@@ -633,7 +916,7 @@ export function CalendarView() {
                                     ) : null}
                                   </span>
                                 </div>
-                              </Link>
+                              </button>
                             )
                           })}
                           {more > 0 ? <div className="text-[11px] text-slate-400">+{more}</div> : null}
@@ -645,6 +928,160 @@ export function CalendarView() {
           )
 	        })}
 	      </div>
+
+        {previewTask ? (
+          <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/30 px-3 pb-3 pt-20 md:items-center md:p-6">
+            <div
+              className="absolute inset-0"
+              onClick={closePreviewTask}
+              aria-hidden="true"
+            />
+            <div className="relative w-full max-w-2xl overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-2xl">
+              <div className="px-5 py-5 md:px-6">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex min-w-0 items-center gap-2">
+                    {(() => {
+                      const hasAnyRecord = Boolean(
+                        previewTask.actualStartTime ||
+                          previewTask.actualEndTime ||
+                          typeof previewTask.actualSeconds === 'number'
+                      )
+                      const isCompleted = previewTask.status === 'completed' || hasAnyRecord
+                      const color = previewSubject?.color ?? '#94a3b8'
+                      return isCompleted ? (
+                        <span
+                          className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-[5px]"
+                          style={{ background: color }}
+                          aria-hidden="true"
+                        >
+                          <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 text-white">
+                            <path
+                              d="M20 6L9 17l-5-5"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="3"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            />
+                          </svg>
+                        </span>
+                      ) : (
+                        <span
+                          className="inline-block h-4 w-4 shrink-0 rounded-[5px] border-2"
+                          style={{ borderColor: color }}
+                          aria-hidden="true"
+                        />
+                      )
+                    })()}
+                    <span className="truncate text-sm font-semibold text-slate-500">{previewSubject?.name ?? '과목'}</span>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                  <Button variant="secondary" onClick={() => navigate(`/task/${previewTask.id}`)}>
+                    레거시
+                  </Button>
+                  <Button variant="secondary" onClick={() => setRecordTaskId(previewTask.id)}>
+                    기록
+                  </Button>
+                  <Button variant="secondary" onClick={() => setEditTaskId(previewTask.id)}>
+                    편집
+                  </Button>
+                  <Button variant="ghost" onClick={closePreviewTask}>
+                    닫기
+                  </Button>
+                </div>
+                </div>
+
+                <div className="mt-2.5 text-2xl font-semibold leading-tight text-slate-900 md:text-[30px]">
+                  {previewTask.title}
+                </div>
+                {previewTask.date ? (
+                  <div className="mt-2 text-base text-slate-500">{formatTaskPreviewDate(previewTask.date)}</div>
+                ) : null}
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 px-5 py-5 md:grid-cols-2 md:px-6">
+                {hasPreviewMeta ? (
+                  <div className="pt-2 md:col-span-2">
+                    <div className="space-y-3">
+                      {previewTask.dueDate ? (
+                        <div className="flex flex-nowrap items-center gap-2.5 text-base font-medium text-indigo-700">
+                          <span className="rounded-full bg-indigo-50 px-3 py-1.5 text-sm font-semibold text-indigo-700">
+                            {formatDday(previewTask.dueDate)}
+                          </span>
+                          <span className="min-w-0 whitespace-nowrap tracking-[-0.02em] md:tracking-[-0.03em] text-indigo-700">
+                            {formatDueDateLabel(previewTask.dueDate)}
+                          </span>
+                        </div>
+                      ) : null}
+                      <div className={`grid gap-3 ${previewHeadlineTimes.length > 1 && hasPreviewCompare ? 'md:grid-cols-2' : 'md:grid-cols-1'}`}>
+                        {previewHeadlineTimes.map((item) => (
+                          <div
+                            key={item.key}
+                            className={`flex min-w-0 flex-nowrap items-center gap-2.5 text-base font-medium ${
+                              item.kind === '목표' ? 'text-slate-400' : 'text-slate-700'
+                            }`}
+                          >
+                            <span
+                              className={`shrink-0 whitespace-nowrap rounded-full px-3 py-1.5 text-sm font-semibold ${
+                                item.kind === '기록' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-500'
+                              }`}
+                            >
+                              {item.badge}
+                            </span>
+                            {item.text ? (
+                              <span className="min-w-0 whitespace-nowrap tracking-[-0.02em] md:tracking-[-0.04em]">
+                                {item.text}
+                              </span>
+                            ) : null}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+                {hasPreviewCompare ? (
+                  <div className="pt-3 md:col-span-2">
+                    <div className="py-1 text-center">
+                      {previewActualSummary ? (
+                        <CompareRail
+                          goalLabel={previewActualSummary.goalLabel}
+                          actualLabel={previewActualSummary.actualLabel}
+                          deltaLabel={previewActualSummary.deltaLabel}
+                          goalSeconds={previewActualSummary.goalSeconds}
+                          actualSeconds={previewActualSummary.actualSeconds}
+                        />
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
+                {previewTask.memo ? (
+                  <div className="rounded-2xl bg-slate-50 px-4 py-3.5 md:col-span-2">
+                    <div className="text-xs font-semibold text-slate-500">메모</div>
+                    <div className="mt-1.5 whitespace-pre-wrap text-base font-medium leading-7 text-slate-900">{previewTask.memo}</div>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        ) : null}
+        <NewTaskSheet
+          open={Boolean(editTaskId && editTask)}
+          taskId={editTaskId}
+          initial={
+            editTask
+              ? {
+                  subjectId: editTask.subjectId,
+                  title: editTask.title,
+                  date: editTask.date,
+                  dueDate: editTask.dueDate ?? '',
+                  plannedStartTime: editTask.plannedStartTime ?? '',
+                  plannedSeconds: editTask.plannedSeconds,
+                }
+              : null
+          }
+          onClose={() => setEditTaskId(null)}
+        />
+        <TaskRecordSheet taskId={recordTaskId} open={Boolean(recordTaskId)} onClose={() => setRecordTaskId(null)} />
 
 	      {/* Always-on floating "Start 예정" popup above bottom bar (mobile). */}
 		      <div
@@ -684,11 +1121,11 @@ export function CalendarView() {
             onPointerMove={onStartDockPointerMove}
             onPointerUp={onStartDockPointerUp}
             onPointerCancel={onStartDockPointerUp}
-            style={{ touchAction: 'none' }}
-	            aria-label="시작 예정 열기"
-	          >
-	            <span className="text-3xl font-semibold text-slate-700">+</span>
-	          </button>
+		            style={{ touchAction: 'none' }}
+		            aria-label="시작 예정 열기"
+		          >
+		            <StartPendingBubbleIcon />
+		          </button>
 
           {startPopupEverOpened ? (
             <div
@@ -713,21 +1150,17 @@ export function CalendarView() {
                   ) : null}
                 </div>
                 <div className="flex items-center gap-2">
-                  <Button
-                    onClick={() => {
-                      const subjectId = subjects.find((s) => s.examId === activeExamId)?.id ?? subjects[0]?.id
-                      if (!subjectId) {
-                        navigate('/subjects')
-                        return
-                      }
-                      const id = addTask({ subjectId, title: '공부', plannedSeconds: 60 * 60, examId: activeExamId })
-                      navigate(`/task/${id}`)
-                    }}
-                  >
+                  <Button onClick={() => newTaskSheet?.openSheet()}>
                     + 일정 추가
                   </Button>
-                  <Button variant="secondary" onClick={() => setStartOpen(false)}>
-                    닫기
+                  <Button
+                    variant="secondary"
+                    onClick={() => setStartOpen(false)}
+                    aria-label="시작 예정 닫기"
+                  >
+                    <span aria-hidden="true" className="text-lg leading-none">
+                      ×
+                    </span>
                   </Button>
                 </div>
               </div>
@@ -786,9 +1219,13 @@ export function CalendarView() {
 	                                const titleMobile = truncateToUnits(t.title, titleMaxUnitsMobile)
 	                                const titleDesktop = truncateToUnits(t.title, titleMaxUnitsDesktop)
 	                                return (
-	                                  <Link
+	                                  <button
                                     key={t.id}
-                                    to={`/task/${t.id}`}
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      openPreviewTask(t.id)
+                                    }}
                                     draggable
                                     onDragStart={(e) => {
                                       e.dataTransfer.setData('text/emma-task-id', t.id)
@@ -821,7 +1258,7 @@ export function CalendarView() {
                                         ) : null}
                                       </span>
                                     </div>
-	                                  </Link>
+	                                  </button>
 	                                )
 	                                    })}
 	                                  </div>

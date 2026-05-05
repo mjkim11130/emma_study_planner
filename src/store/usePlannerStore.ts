@@ -16,6 +16,7 @@ type PlannerState = {
 
   subjects: Subject[]
   tasks: StudyTask[]
+  lastUsedSubjectIdByExam: Record<string, string>
   addSubject: (input: { name: string; color: string; examId?: string }) => void
   updateSubject: (id: string, patch: Partial<Pick<Subject, 'name' | 'color' | 'examId'>>) => void
   deleteSubject: (id: string) => void
@@ -24,6 +25,7 @@ type PlannerState = {
     title: string
     date?: string
     dueDate?: string
+    plannedStartTime?: string
     plannedSeconds: number
     examId?: string
   }) => string
@@ -67,6 +69,7 @@ const seed = () => {
     activeExamId: exam1Id,
     subjects,
     tasks: [] as StudyTask[],
+    lastUsedSubjectIdByExam: {} as Record<string, string>,
   }
 }
 
@@ -132,7 +135,7 @@ export const usePlannerStore = create<PlannerState>()(
           subjects: state.subjects.filter((s) => s.id !== id),
           tasks: state.tasks.filter((t) => t.subjectId !== id),
         })),
-      addTask: ({ subjectId, title, date, dueDate, plannedSeconds, examId }) => {
+      addTask: ({ subjectId, title, date, dueDate, plannedStartTime, plannedSeconds, examId }) => {
         const id = randomId('task')
         const createdAt = nowIso()
         const resolvedExamId = examId ?? get().activeExamId
@@ -143,44 +146,59 @@ export const usePlannerStore = create<PlannerState>()(
           title: title.trim() || '새 일정',
           date: date ?? '',
           dueDate: typeof dueDate === 'string' && dueDate ? dueDate : undefined,
+          plannedStartTime: typeof plannedStartTime === 'string' && plannedStartTime ? plannedStartTime : undefined,
           plannedSeconds: Math.max(0, Math.floor(plannedSeconds)),
           status: 'pending',
           createdAt,
           updatedAt: createdAt,
         }
-        set((state) => ({ tasks: [...state.tasks, task] }))
+        set((state) => ({
+          tasks: [...state.tasks, task],
+          lastUsedSubjectIdByExam: { ...state.lastUsedSubjectIdByExam, [resolvedExamId]: subjectId },
+        }))
         return id
       },
       updateTask: (id, patch) =>
-        set((state) => ({
-          tasks: state.tasks.map((t) => {
-            if (t.id !== id) return t
-            const next = { ...t, ...patch, updatedAt: nowIso() }
-            const invalidActualRange = isInvalidTimeRange(next.actualStartTime, next.actualEndTime)
-            const actualSeconds = invalidActualRange
-              ? undefined
-              : patch.actualSeconds !== undefined
-                ? patch.actualSeconds
-                : computeActualSeconds(next.actualStartTime, next.actualEndTime)
-            const status =
-              invalidActualRange
-                ? 'pending'
-                : next.actualStartTime && next.actualEndTime
-                  ? 'completed'
-                  : actualSeconds !== undefined
+        set((state) => {
+          const current = state.tasks.find((t) => t.id === id)
+          if (!current) return state
+          const nextExamId = patch.examId ?? current.examId
+          const nextSubjectId = patch.subjectId ?? current.subjectId
+          return {
+            lastUsedSubjectIdByExam: { ...state.lastUsedSubjectIdByExam, [nextExamId]: nextSubjectId },
+            tasks: state.tasks.map((t) => {
+              if (t.id !== id) return t
+              const next = { ...t, ...patch, updatedAt: nowIso() }
+              const invalidActualRange = isInvalidTimeRange(next.actualStartTime, next.actualEndTime)
+              const actualSeconds = invalidActualRange
+                ? undefined
+                : patch.actualSeconds !== undefined
+                  ? patch.actualSeconds
+                  : computeActualSeconds(next.actualStartTime, next.actualEndTime)
+              const status =
+                invalidActualRange
+                  ? 'pending'
+                  : next.actualStartTime && next.actualEndTime
                     ? 'completed'
-                    : (next.status ?? 'pending')
-            return { ...next, actualSeconds, status }
-          }),
-        })),
+                    : actualSeconds !== undefined
+                      ? 'completed'
+                      : (next.status ?? 'pending')
+              return { ...next, actualSeconds, status }
+            }),
+          }
+        }),
       deleteTask: (id) => set((state) => ({ tasks: state.tasks.filter((t) => t.id !== id) })),
     }),
     {
       name: 'emma-study-planner:v1',
-      version: 6,
+      version: 7,
       migrate: (persisted: any, fromVersion) => {
         if (!persisted || typeof persisted !== 'object') return seed()
-        if (fromVersion >= 6) return persisted
+        if (fromVersion >= 7) return persisted
+
+        if (fromVersion === 6) {
+          return { ...persisted, lastUsedSubjectIdByExam: {} }
+        }
 
         if (fromVersion === 5) {
           // v5 -> v6: planned/actual 시간을 초 단위로 전환

@@ -1,9 +1,10 @@
-import { useMemo, useState } from 'react'
+import { useContext, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Button, Card, CardHeader, Input, Select } from '../components/ui'
 import { formatHmsFromSeconds } from '../lib/time'
 import { usePlannerStore } from '../store/usePlannerStore'
 import { MobileTopBar } from '../components/MobileTopBar'
+import { NewTaskSheetContext } from '../components/AppLayout'
 
 type Tab = 'all' | 'completed' | 'pending'
 
@@ -13,14 +14,11 @@ export function SubjectDashboardView() {
   const subjects = usePlannerStore((s) => s.subjects)
   const activeExamId = usePlannerStore((s) => s.activeExamId)
   const allTasks = usePlannerStore((s) => s.tasks)
-  const addTask = usePlannerStore((s) => s.addTask)
+  const newTaskSheet = useContext(NewTaskSheetContext)
   const subjectIdFromRoute = params.subjectId ?? ''
 
   if (!subjectIdFromRoute) {
-    return <AllSubjectsDashboard subjects={subjects} allTasks={allTasks} activeExamId={activeExamId} onCreateTask={(input) => {
-      const id = addTask({ ...input, examId: activeExamId })
-      navigate(`/task/${id}`)
-    }} onOpenSubject={(id) => navigate(`/dashboard/${id}`)} />
+    return <AllSubjectsDashboard subjects={subjects} allTasks={allTasks} activeExamId={activeExamId} onCreateTask={(input) => newTaskSheet?.openSheet(input)} onOpenSubject={(id) => navigate(`/dashboard/${id}`)} />
   }
 
   return (
@@ -30,6 +28,7 @@ export function SubjectDashboardView() {
       allTasks={allTasks}
       activeExamId={activeExamId}
       onNavigate={(path) => navigate(path)}
+      onCreateTask={(input) => newTaskSheet?.openSheet(input)}
     />
   )
 }
@@ -220,6 +219,7 @@ function SingleSubjectDashboard({
   allTasks,
   activeExamId,
   onNavigate,
+  onCreateTask,
 }: {
   subjectId: string
   subjects: { id: string; examId: string; name: string; color: string }[]
@@ -237,9 +237,9 @@ function SingleSubjectDashboard({
   }[]
   activeExamId: string
   onNavigate: (path: string) => void
+  onCreateTask: (input: { subjectId: string; title: string; date?: string; plannedSeconds: number }) => void
 }) {
   const [tab, setTab] = useState<Tab>('all')
-  const addTask = usePlannerStore((s) => s.addTask)
   const subject = subjects.find((x) => x.id === subjectId)
   const tasksForActiveExam = useMemo(
     () => allTasks.filter((t) => t.examId === activeExamId && t.subjectId === subjectId),
@@ -325,12 +325,11 @@ function SingleSubjectDashboard({
                 <Button
                   onClick={() => {
                     const plannedMinutes = Math.max(0, Math.floor(Number(newPlanned || 0)))
-                    addTask({
+                    onCreateTask({
                       subjectId,
                       title: newTitle.trim() || '공부',
                       date: newDate.trim() ? newDate : undefined,
                       plannedSeconds: plannedMinutes * 60,
-                      examId: activeExamId,
                     })
                     setCreatedToast(true)
                     window.setTimeout(() => setCreatedToast(false), 1600)

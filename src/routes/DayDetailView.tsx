@@ -1,11 +1,12 @@
 import { format } from 'date-fns'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom'
 import { ymdToDate } from '../lib/dates'
 import { formatHmsFromSeconds } from '../lib/time'
 import { Button, Card, CardHeader } from '../components/ui'
 import { usePlannerStore } from '../store/usePlannerStore'
 import { MobileTopBar } from '../components/MobileTopBar'
+import { NewTaskSheetContext } from '../components/AppLayout'
 
 function hmToMinutesLocal(hm?: string) {
   if (!hm) return null
@@ -100,6 +101,7 @@ function saveTimelineWindow(date: string, win: TimelineWindow) {
 
 export function DayDetailView() {
   const navigate = useNavigate()
+  const newTaskSheet = useContext(NewTaskSheetContext)
   const params = useParams()
   const date = params.date ?? ''
   if (!date) return <Navigate to="/calendar" replace />
@@ -107,7 +109,6 @@ export function DayDetailView() {
   const subjects = usePlannerStore((s) => s.subjects)
   const allTasks = usePlannerStore((s) => s.tasks)
   const tasks = useMemo(() => allTasks.filter((t) => t.examId === activeExamId && t.date === date), [allTasks, activeExamId, date])
-  const addTask = usePlannerStore((s) => s.addTask)
   const updateTask = usePlannerStore((s) => s.updateTask)
 
   const [timelineWindow, setTimelineWindow] = useState<TimelineWindow>(() => loadTimelineWindow(date))
@@ -191,17 +192,7 @@ export function DayDetailView() {
           </Button>
         }
         right={
-          <Button
-            onClick={() => {
-              const subjectId = subjects.find((s) => s.examId === activeExamId)?.id ?? subjects[0]?.id
-              if (!subjectId || !date) {
-                navigate('/subjects')
-                return
-              }
-              const id = addTask({ subjectId, title: '공부', date, plannedSeconds: 60 * 60, examId: activeExamId })
-              navigate(`/task/${id}`)
-            }}
-          >
+          <Button onClick={() => newTaskSheet?.openSheet(date ? { date } : undefined)}>
             + 새 일정
           </Button>
         }
@@ -213,17 +204,7 @@ export function DayDetailView() {
             ← 캘린더
           </Button>
           <div className="flex items-center gap-2">
-            <Button
-              onClick={() => {
-                const subjectId = subjects.find((s) => s.examId === activeExamId)?.id ?? subjects[0]?.id
-                if (!subjectId || !date) {
-                  navigate('/subjects')
-                  return
-                }
-                const id = addTask({ subjectId, title: '공부', date, plannedSeconds: 60 * 60, examId: activeExamId })
-                navigate(`/task/${id}`)
-              }}
-            >
+            <Button onClick={() => newTaskSheet?.openSheet(date ? { date } : undefined)}>
               + 새 일정
             </Button>
           </div>
@@ -255,7 +236,10 @@ export function DayDetailView() {
                         title="타임라인으로 드래그해서 배치"
                       >
                         <span className="min-w-0 truncate">
-                          <span className="mr-2 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ background: subject?.color ?? '#94a3b8' }} />
+                          <span
+                            className="mr-2 inline-block h-4 w-4 rounded-[5px] border-2 align-middle"
+                            style={{ borderColor: subject?.color ?? '#94a3b8' }}
+                          />
                           <span className="align-middle font-semibold text-slate-900">{t.title}</span>
                         </span>
                         <span className="shrink-0 text-xs text-slate-500">{formatHmsFromSeconds(t.plannedSeconds)}</span>
@@ -341,7 +325,15 @@ export function DayDetailView() {
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className="h-2.5 w-2.5 rounded-full" style={{ background: subject?.color ?? '#94a3b8' }} />
+                      <span
+                        className="inline-flex h-4 w-4 items-center justify-center rounded-[5px]"
+                        style={{ background: subject?.color ?? '#94a3b8' }}
+                        aria-hidden="true"
+                      >
+                        <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 text-white">
+                          <path d="M20 6L9 17l-5-5" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      </span>
                       <div className="truncate text-sm font-semibold text-slate-900">{t.title}</div>
                     </div>
                     <div className="mt-1 text-xs text-slate-500">
@@ -372,7 +364,11 @@ export function DayDetailView() {
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className="h-2.5 w-2.5 rounded-full" style={{ background: subject?.color ?? '#94a3b8' }} />
+                      <span
+                        className="inline-block h-4 w-4 rounded-[5px] border-2"
+                        style={{ borderColor: subject?.color ?? '#94a3b8' }}
+                        aria-hidden="true"
+                      />
                       <div className="truncate text-sm font-semibold text-slate-900">{t.title}</div>
                     </div>
                     <div className="mt-1 text-xs text-slate-500">
