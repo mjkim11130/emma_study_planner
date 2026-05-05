@@ -127,10 +127,6 @@ export function NewTaskSheet({
   const closeTimerRef = useRef<number | null>(null)
   const subjectListRef = useRef<HTMLDivElement | null>(null)
   const subjectButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({})
-  const dateInputRef = useRef<HTMLInputElement | null>(null)
-  const dueDateInputRef = useRef<HTMLInputElement | null>(null)
-  const startTimeInputRef = useRef<HTMLInputElement | null>(null)
-  const durationInputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
     if (!open) return
@@ -239,16 +235,6 @@ export function NewTaskSheet({
 
   if (!open) return null
 
-  const openNativePicker = (ref: React.RefObject<HTMLInputElement | null>) => {
-    const el = ref.current
-    if (!el) return
-    if (typeof el.showPicker === 'function') {
-      el.showPicker()
-      return
-    }
-    el.click()
-  }
-
   const subjectPillBase = 'shrink-0 rounded-full px-3 py-2 text-sm font-semibold transition'
   const fieldButtonBase =
     'relative flex min-h-12 w-full items-center justify-center rounded-2xl px-4 py-3 text-center text-sm font-semibold transition'
@@ -278,11 +264,6 @@ export function NewTaskSheet({
         </div>
 
         <div className="max-h-[78vh] overflow-y-auto px-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
-          <input ref={dateInputRef} type="date" value={draft.date} onChange={(e) => setDraft((cur) => ({ ...cur, date: e.target.value }))} className="sr-only" tabIndex={-1} aria-hidden="true" />
-          <input ref={dueDateInputRef} type="date" value={draft.dueDate} onChange={(e) => setDraft((cur) => ({ ...cur, dueDate: e.target.value }))} className="sr-only" tabIndex={-1} aria-hidden="true" />
-          <input ref={startTimeInputRef} type="time" value={draft.plannedStartTime} onChange={(e) => setDraft((cur) => ({ ...cur, plannedStartTime: e.target.value }))} className="sr-only" tabIndex={-1} aria-hidden="true" />
-          <input ref={durationInputRef} type="time" step={60} value={durationSecondsToInputValue(draft.plannedSeconds)} onChange={(e) => setDraft((cur) => ({ ...cur, plannedSeconds: inputValueToDurationSeconds(e.target.value) }))} className="sr-only" tabIndex={-1} aria-hidden="true" />
-
           <div className="grid grid-cols-1 gap-5 py-2">
             <div>
               <input
@@ -332,13 +313,16 @@ export function NewTaskSheet({
               <div className="text-[11px] font-semibold text-slate-400">날짜</div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="relative">
-                  <button
-                    type="button"
-                    onClick={() => openNativePicker(dateInputRef)}
-                    className={`${fieldButtonBase} ${draft.date ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-400'}`}
-                  >
+                  <div className={`${fieldButtonBase} ${draft.date ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-400'}`}>
                     {formatDateButtonLabel(draft.date)}
-                  </button>
+                    <input
+                      type="date"
+                      value={draft.date}
+                      onChange={(e) => setDraft((cur) => ({ ...cur, date: e.target.value }))}
+                      aria-label="날짜 선택"
+                      className="absolute inset-0 z-10 cursor-pointer opacity-0"
+                    />
+                  </div>
                   {draft.date ? (
                     <button
                       type="button"
@@ -346,7 +330,7 @@ export function NewTaskSheet({
                         e.stopPropagation()
                         setDraft((cur) => ({ ...cur, date: '' }))
                       }}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-white/18 px-2 py-0.5 text-xs font-semibold text-white"
+                      className="absolute right-2 top-1/2 z-20 -translate-y-1/2 rounded-full bg-white/18 px-2 py-0.5 text-xs font-semibold text-white"
                       aria-label="날짜 삭제"
                     >
                       ×
@@ -354,13 +338,16 @@ export function NewTaskSheet({
                   ) : null}
                 </div>
                 <div className="relative">
-                  <button
-                    type="button"
-                    onClick={() => openNativePicker(dueDateInputRef)}
-                    className={`${fieldButtonBase} ${draft.dueDate ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-400'}`}
-                  >
+                  <div className={`${fieldButtonBase} ${draft.dueDate ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-400'}`}>
                     {formatDueDateButtonLabel(draft.dueDate)}
-                  </button>
+                    <input
+                      type="date"
+                      value={draft.dueDate}
+                      onChange={(e) => setDraft((cur) => ({ ...cur, dueDate: e.target.value }))}
+                      aria-label="마감일 선택"
+                      className="absolute inset-0 z-10 cursor-pointer opacity-0"
+                    />
+                  </div>
                   {draft.dueDate ? (
                     <button
                       type="button"
@@ -368,7 +355,7 @@ export function NewTaskSheet({
                         e.stopPropagation()
                         setDraft((cur) => ({ ...cur, dueDate: '' }))
                       }}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-white/18 px-2 py-0.5 text-xs font-semibold text-white"
+                      className="absolute right-2 top-1/2 z-20 -translate-y-1/2 rounded-full bg-white/18 px-2 py-0.5 text-xs font-semibold text-white"
                       aria-label="마감일 삭제"
                     >
                       ×
@@ -382,13 +369,16 @@ export function NewTaskSheet({
               <div className="text-[11px] font-semibold text-slate-400">목표</div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="relative">
-                  <button
-                    type="button"
-                    onClick={() => openNativePicker(startTimeInputRef)}
-                    className={`${fieldButtonBase} ${draft.plannedStartTime ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-400'}`}
-                  >
+                  <div className={`${fieldButtonBase} ${draft.plannedStartTime ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-400'}`}>
                     {formatStartTimeButtonLabel(draft.plannedStartTime)}
-                  </button>
+                    <input
+                      type="time"
+                      value={draft.plannedStartTime}
+                      onChange={(e) => setDraft((cur) => ({ ...cur, plannedStartTime: e.target.value }))}
+                      aria-label="목표 시작시간 선택"
+                      className="absolute inset-0 z-10 cursor-pointer opacity-0"
+                    />
+                  </div>
                   {draft.plannedStartTime ? (
                     <button
                       type="button"
@@ -396,7 +386,7 @@ export function NewTaskSheet({
                         e.stopPropagation()
                         setDraft((cur) => ({ ...cur, plannedStartTime: '' }))
                       }}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-white/18 px-2 py-0.5 text-xs font-semibold text-white"
+                      className="absolute right-2 top-1/2 z-20 -translate-y-1/2 rounded-full bg-white/18 px-2 py-0.5 text-xs font-semibold text-white"
                       aria-label="목표 시작시간 삭제"
                     >
                       ×
@@ -404,13 +394,19 @@ export function NewTaskSheet({
                   ) : null}
                 </div>
                 <div className="relative">
-                  <button
-                    type="button"
-                    onClick={() => openNativePicker(durationInputRef)}
-                    className={`${fieldButtonBase} ${draft.plannedSeconds > 0 ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-400'}`}
-                  >
+                  <div className={`${fieldButtonBase} ${draft.plannedSeconds > 0 ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-400'}`}>
                     {formatDurationButtonLabel(draft.plannedSeconds)}
-                  </button>
+                    <input
+                      type="time"
+                      step={60}
+                      value={durationSecondsToInputValue(draft.plannedSeconds)}
+                      onChange={(e) =>
+                        setDraft((cur) => ({ ...cur, plannedSeconds: inputValueToDurationSeconds(e.target.value) }))
+                      }
+                      aria-label="목표 소요시간 선택"
+                      className="absolute inset-0 z-10 cursor-pointer opacity-0"
+                    />
+                  </div>
                   {draft.plannedSeconds > 0 ? (
                     <button
                       type="button"
@@ -418,7 +414,7 @@ export function NewTaskSheet({
                         e.stopPropagation()
                         setDraft((cur) => ({ ...cur, plannedSeconds: 0 }))
                       }}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full bg-white/18 px-2 py-0.5 text-xs font-semibold text-white"
+                      className="absolute right-2 top-1/2 z-20 -translate-y-1/2 rounded-full bg-white/18 px-2 py-0.5 text-xs font-semibold text-white"
                       aria-label="목표 소요시간 삭제"
                     >
                       ×
