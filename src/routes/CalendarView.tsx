@@ -1,10 +1,19 @@
-import { addDays, addMonths, differenceInCalendarDays, differenceInCalendarMonths, format, parseISO, startOfWeek } from 'date-fns'
+import {
+  addDays,
+  addMonths,
+  differenceInCalendarDays,
+  endOfMonth,
+  endOfWeek,
+  format,
+  parseISO,
+  startOfWeek,
+} from 'date-fns'
 import { ko } from 'date-fns/locale'
 import { useContext, useEffect, useMemo, useRef, useState, type ReactNode, type WheelEvent as ReactWheelEvent } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { todayYmd } from '../lib/dates'
 import { formatRoundedDurationKoFromSeconds, formatRoundedDurationShortFromSeconds } from '../lib/time'
-import { Button, Card } from '../components/ui'
+import { Button } from '../components/ui'
 import { usePlannerStore } from '../store/usePlannerStore'
 import { MobileTopBar } from '../components/MobileTopBar'
 import { NewTaskSheetContext } from '../components/AppLayout'
@@ -221,20 +230,11 @@ export function CalendarView() {
   const tasks = usePlannerStore((s) => s.tasks)
   const updateTask = usePlannerStore((s) => s.updateTask)
   const today = useMemo(() => parseISO(todayYmd()), [])
-  const scrollRef = useRef<HTMLDivElement | null>(null)
-  const weekSectionRefs = useRef<Record<string, HTMLDivElement | null>>({})
-  const weekdayHeaderRef = useRef<HTMLDivElement | null>(null)
-  const [startOpen, setStartOpen] = useState(true)
+  const [startOpen, setStartOpen] = useState(false)
   const [editTaskId, setEditTaskId] = useState<string | null>(null)
   const [recordTaskId, setRecordTaskId] = useState<string | null>(null)
-  const [startPopupEverOpened, setStartPopupEverOpened] = useState(false)
   const [startDock, setStartDock] = useState<{ v: 'top' | 'bottom'; h: 'right' }>({ v: 'bottom', h: 'right' })
-  const [topDockY, setTopDockY] = useState<number>(() => 64)
-  const isAdjustingMonthsRef = useRef(false)
-  const scrollGestureStartMonthRef = useRef<string | null>(null)
-  const lastWheelAtRef = useRef(0)
-  const strongWheelAccumRef = useRef<{ at: number; sum: number }>({ at: 0, sum: 0 })
-  const scrollSnapTimerRef = useRef<number | null>(null)
+  const topDockY = 64
   const scrollAnimRef = useRef<number | null>(null)
   const dragRef = useRef<{
     isDragging: boolean
@@ -308,17 +308,16 @@ export function CalendarView() {
     return out
   }
 
-  const [displayMonth, setDisplayMonth] = useState(() => format(new Date(), 'yyyy-MM'))
+  const [displayMonth, setDisplayMonth] = useState(() => format(parseISO(todayYmd()), 'yyyy-MM'))
   const [dragOverDate, setDragOverDate] = useState<string | null>(null)
-  const [weeks, setWeeks] = useState<string[]>(() => {
-    const base = parseISO(`${displayMonth}-01`)
-    const firstWeek = startOfWeek(base, { weekStartsOn: 0 })
+  const monthWeeks = useMemo(() => {
+    const monthStart = parseISO(`${displayMonth}-01`)
+    const gridStart = startOfWeek(monthStart, { weekStartsOn: 0 })
+    const gridEnd = endOfWeek(endOfMonth(monthStart), { weekStartsOn: 0 })
     const list: string[] = []
-    for (let i = -2; i <= 14; i += 1) {
-      list.push(format(addDays(firstWeek, i * 7), 'yyyy-MM-dd'))
-    }
+    for (let d = gridStart; d <= gridEnd; d = addDays(d, 7)) list.push(format(d, 'yyyy-MM-dd'))
     return list
-  })
+  }, [displayMonth])
 
   const examCountdown = useMemo(() => {
     if (!activeExam?.examDate) return null
@@ -376,10 +375,10 @@ export function CalendarView() {
     () => subjects.find((subject) => subject.id === previewTask?.subjectId) ?? null,
     [subjects, previewTask?.subjectId],
   )
-  const previewPlannedEnd = useMemo(() => {
-    if (!previewTask?.plannedStartTime || previewTask.plannedSeconds <= 0) return null
-    return addSecondsToHm(previewTask.plannedStartTime, previewTask.plannedSeconds)
-  }, [previewTask?.plannedStartTime, previewTask?.plannedSeconds])
+  const previewPlannedEnd =
+    previewTask?.plannedStartTime && previewTask.plannedSeconds > 0
+      ? addSecondsToHm(previewTask.plannedStartTime, previewTask.plannedSeconds)
+      : null
   const previewActualSummary = useMemo(() => {
     if (!previewTask) return null
     if (typeof previewTask.actualSeconds !== 'number') return null
@@ -480,82 +479,14 @@ export function CalendarView() {
     return pieces.length ? pieces.join(' · ') : null
   }, [activeExam, examCountdown])
 
-  const animateScrollTop = (el: HTMLElement, to: number, durationMs = 260) => {
+  useEffect(() => {
+    try {
+      if ('scrollRestoration' in window.history) window.history.scrollRestoration = 'manual'
+    } catch {
+      // ignore
+    }
     if (scrollAnimRef.current) window.cancelAnimationFrame(scrollAnimRef.current)
-    const from = el.scrollTop
-    const delta = to - from
-    if (Math.abs(delta) < 1) return
-    const start = performance.now()
-    const easeOutCubic = (t: number) => 1 - Math.pow(1 - t, 3)
-    const tick = (now: number) => {
-      const t = Math.min(1, (now - start) / durationMs)
-      el.scrollTop = from + delta * easeOutCubic(t)
-      if (t < 1) scrollAnimRef.current = window.requestAnimationFrame(tick)
-    }
-    scrollAnimRef.current = window.requestAnimationFrame(tick)
-  }
-
-  const scrollToWeek = (weekStartYmd: string) => {
-    const root = scrollRef.current
-    const el = weekSectionRefs.current[weekStartYmd]
-    if (!root || !el) return
-    const headerH = weekdayHeaderRef.current?.offsetHeight ?? 32
-    // Align week start just below the sticky weekday header (robust to nested offsetParents).
-    const rootRect = root.getBoundingClientRect()
-    const elRect = el.getBoundingClientRect()
-    const top = root.scrollTop + (elRect.top - rootRect.top) - headerH
-    animateScrollTop(root, top, 280)
-  }
-
-  const nearestMonthStartWeek = (monthYmd: string) => {
-    const monthStart = parseISO(monthYmd)
-    return format(startOfWeek(monthStart, { weekStartsOn: 0 }), 'yyyy-MM-dd')
-  }
-
-  const ensureWeekInWindow = (weekStartYmd: string) => {
-    if (weeks.includes(weekStartYmd)) return
-    const target = parseISO(weekStartYmd)
-    const list: string[] = []
-    for (let i = -2; i <= 14; i += 1) {
-      list.push(format(addDays(target, i * 7), 'yyyy-MM-dd'))
-    }
-    setWeeks(list)
-  }
-
-  useEffect(() => {
-    // initial position
-    const base = parseISO(`${displayMonth}-01`)
-    const firstWeek = format(startOfWeek(base, { weekStartsOn: 0 }), 'yyyy-MM-dd')
-    scrollToWeek(firstWeek)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-
-  useEffect(() => {
-    if (startOpen) setStartPopupEverOpened(true)
-  }, [startOpen])
-
-  const recomputeTopDockY = () => {
-    const header = weekdayHeaderRef.current
-    if (!header) return
-    const rect = header.getBoundingClientRect()
-    // Dock just below weekday header.
-    setTopDockY(Math.round(rect.bottom) + 6)
-  }
-
-  useEffect(() => {
-    recomputeTopDockY()
-    const root = scrollRef.current
-    root?.addEventListener('scroll', recomputeTopDockY, { passive: true })
-    window.addEventListener('resize', recomputeTopDockY)
-    return () => {
-      root?.removeEventListener('scroll', recomputeTopDockY)
-      window.removeEventListener('resize', recomputeTopDockY)
-    }
-  }, [])
-
-  useEffect(() => {
-    if (startDock.v === 'top') recomputeTopDockY()
-  }, [startDock.v])
 
   const onStartDockPointerDown = (e: React.PointerEvent, allowOnInteractive: boolean) => {
     // only for mobile floating widget; ignore right click etc.
@@ -612,198 +543,6 @@ export function CalendarView() {
     }
   }
 
-
-  useEffect(() => {
-    const root = scrollRef.current
-    if (!root) return
-
-    let raf = 0
-    const jumpToMonth = (deltaMonths: number) => {
-      const base = parseISO(`${displayMonth}-01`)
-      const targetMonth = format(addMonths(base, deltaMonths), 'yyyy-MM')
-      const monthStartWeek = nearestMonthStartWeek(`${targetMonth}-01`)
-      isAdjustingMonthsRef.current = true
-      ensureWeekInWindow(monthStartWeek)
-      setDisplayMonth(targetMonth)
-      requestAnimationFrame(() => {
-        scrollToWeek(monthStartWeek)
-        window.setTimeout(() => {
-          isAdjustingMonthsRef.current = false
-        }, 320)
-      })
-    }
-
-    const onWheel = (e: WheelEvent) => {
-      // Track a "gesture" start month so momentum scrolling can't skip more than 1 month.
-      const now = Date.now()
-      if (now - lastWheelAtRef.current > 260) scrollGestureStartMonthRef.current = displayMonth
-      lastWheelAtRef.current = now
-
-      // If the wheel input is strong enough, interpret it as "go prev/next month"
-      // and don't perform the native scroll.
-      // Trackpads often emit many small deltas; we also accumulate briefly.
-      const dy = e.deltaY
-      const absDy = Math.abs(dy)
-      const absDx = Math.abs(e.deltaX)
-      if (absDx > absDy) return
-
-      const prev = strongWheelAccumRef.current
-      const within = now - prev.at < 90
-      const sum = (within ? prev.sum : 0) + absDy
-      strongWheelAccumRef.current = { at: now, sum }
-
-      const isStrong = absDy >= 120 || sum >= 220
-      if (!isStrong) return
-
-      e.preventDefault()
-      e.stopPropagation()
-      strongWheelAccumRef.current = { at: 0, sum: 0 }
-      scrollGestureStartMonthRef.current = displayMonth
-      jumpToMonth(dy > 0 ? 1 : -1)
-    }
-
-    const onScroll = () => {
-      cancelAnimationFrame(raf)
-      raf = window.requestAnimationFrame(() => {
-        if (isAdjustingMonthsRef.current) return
-
-        // Expand week window when reaching edges (keeps scroll feeling continuous).
-        const nearTop = root.scrollTop < 160
-        const nearBottom = root.scrollHeight - (root.scrollTop + root.clientHeight) < 160
-        if (nearTop && weeks.length) {
-          const first = weeks[0]
-          const prev = format(addDays(parseISO(first), -7), 'yyyy-MM-dd')
-          if (!weeks.includes(prev)) {
-            isAdjustingMonthsRef.current = true
-            const prevScrollHeight = root.scrollHeight
-            setWeeks((cur) => [prev, ...cur])
-            requestAnimationFrame(() => {
-              // preserve visual position after prepend
-              const delta = root.scrollHeight - prevScrollHeight
-              root.scrollTop += delta
-              isAdjustingMonthsRef.current = false
-            })
-            return
-          }
-        }
-        if (nearBottom && weeks.length) {
-          const last = weeks[weeks.length - 1]
-          const next = format(addDays(parseISO(last), 7), 'yyyy-MM-dd')
-          if (!weeks.includes(next)) {
-            setWeeks((cur) => [...cur, next])
-            return
-          }
-        }
-
-        const rootRect = root.getBoundingClientRect()
-        const headerH = weekdayHeaderRef.current?.getBoundingClientRect().height ?? 0
-        const visibleTop = rootRect.top + headerH
-        const visibleBottom = rootRect.bottom
-        const visibleHeight = Math.max(1, visibleBottom - visibleTop)
-
-        // Determine the month occupying >= 50% of the visible calendar area.
-        const monthToVisiblePx = new Map<string, number>()
-        const weekRects = weeks
-          .map((w) => {
-            const el = weekSectionRefs.current[w]
-            if (!el) return null
-            const rect = el.getBoundingClientRect()
-            const overlap = Math.max(0, Math.min(rect.bottom, visibleBottom) - Math.max(rect.top, visibleTop))
-            const mid = addDays(parseISO(w), 3)
-            const m = format(mid, 'yyyy-MM')
-            monthToVisiblePx.set(m, (monthToVisiblePx.get(m) ?? 0) + overlap)
-            return { w, rect, overlap, month: m }
-          })
-          .filter(Boolean) as Array<{ w: string; rect: DOMRect; overlap: number; month: string }>
-        if (!weekRects.length) return
-
-        let bestMonth = displayMonth
-        let bestPx = 0
-        for (const [m, px] of monthToVisiblePx.entries()) {
-          if (px > bestPx) {
-            bestPx = px
-            bestMonth = m
-          }
-        }
-        if (bestPx / visibleHeight >= 0.5 && bestMonth !== displayMonth) setDisplayMonth(bestMonth)
-
-        // Snap when scroll settles:
-        // - Always snap to the nearest week row (so the grid "sticks" under the weekday header).
-        // - Clamp momentum so we can't skip more than 1 month per gesture.
-        if (scrollSnapTimerRef.current) window.clearTimeout(scrollSnapTimerRef.current)
-        scrollSnapTimerRef.current = window.setTimeout(() => {
-          if (isAdjustingMonthsRef.current) return
-
-          // If no recent wheel input, don't clamp month changes (e.g. programmatic scrollToWeek).
-          const gestureStartMonth = Date.now() - lastWheelAtRef.current < 650 ? scrollGestureStartMonthRef.current : null
-
-          // Find the week row whose top is closest to the visible top edge.
-          let bestWeek = weeks[0]
-          let bestDist = Number.POSITIVE_INFINITY
-          for (const w of weeks) {
-            const el = weekSectionRefs.current[w]
-            if (!el) continue
-            const rect = el.getBoundingClientRect()
-            const d = Math.abs(rect.top - visibleTop)
-            if (d < bestDist) {
-              bestDist = d
-              bestWeek = w
-            }
-          }
-
-          // Clamp by month (max +/- 1 month from gesture start), then snap to that month boundary.
-          if (gestureStartMonth) {
-            const start = parseISO(`${gestureStartMonth}-01`)
-            const target = parseISO(`${bestMonth}-01`)
-            const diff = differenceInCalendarMonths(target, start)
-            if (diff > 1) {
-              const clamped = format(addMonths(start, 1), 'yyyy-MM')
-              const monthStartWeek = nearestMonthStartWeek(`${clamped}-01`)
-              ensureWeekInWindow(monthStartWeek)
-              setDisplayMonth(clamped)
-              requestAnimationFrame(() => scrollToWeek(monthStartWeek))
-              return
-            }
-            if (diff < -1) {
-              const clamped = format(addMonths(start, -1), 'yyyy-MM')
-              const monthStartWeek = nearestMonthStartWeek(`${clamped}-01`)
-              ensureWeekInWindow(monthStartWeek)
-              setDisplayMonth(clamped)
-              requestAnimationFrame(() => scrollToWeek(monthStartWeek))
-              return
-            }
-          }
-
-          // Week snapping: stick the nearest week to the top.
-          if (bestWeek) {
-            ensureWeekInWindow(bestWeek)
-            scrollToWeek(bestWeek)
-          }
-        }, 160)
-      })
-    }
-
-    root.addEventListener('wheel', onWheel, { passive: false })
-    root.addEventListener('scroll', onScroll, { passive: true })
-    return () => {
-      cancelAnimationFrame(raf)
-      if (scrollSnapTimerRef.current) window.clearTimeout(scrollSnapTimerRef.current)
-      if (scrollAnimRef.current) window.cancelAnimationFrame(scrollAnimRef.current)
-      root.removeEventListener('wheel', onWheel)
-      root.removeEventListener('scroll', onScroll)
-    }
-  }, [weeks, displayMonth])
-
-  const prevMonthLabel = useMemo(() => {
-    const d = addMonths(parseISO(`${displayMonth}-01`), -1)
-    return `${Number(format(d, 'M'))}월`
-  }, [displayMonth])
-
-  const nextMonthLabel = useMemo(() => {
-    const d = addMonths(parseISO(`${displayMonth}-01`), 1)
-    return `${Number(format(d, 'M'))}월`
-  }, [displayMonth])
-
   return (
     <div className="flex h-[calc(100dvh-72px-env(safe-area-inset-bottom))] flex-col overflow-hidden">
       <MobileTopBar
@@ -813,12 +552,10 @@ export function CalendarView() {
             variant="secondary"
             onClick={() => {
               const prevMonth = format(addMonths(parseISO(`${displayMonth}-01`), -1), 'yyyy-MM')
-              const weekStart = nearestMonthStartWeek(`${prevMonth}-01`)
-              ensureWeekInWindow(weekStart)
-              requestAnimationFrame(() => scrollToWeek(weekStart))
+              setDisplayMonth(prevMonth)
             }}
           >
-            {prevMonthLabel}
+            이전
           </Button>
         }
         center={
@@ -830,14 +567,9 @@ export function CalendarView() {
                 onClick={() => {
                   const now = format(new Date(), 'yyyy-MM')
                   setDisplayMonth(now)
-                  const base = startOfWeek(parseISO(`${now}-01`), { weekStartsOn: 0 })
-                  const list: string[] = []
-                  for (let i = -2; i <= 14; i += 1) list.push(format(addDays(base, i * 7), 'yyyy-MM-dd'))
-                  setWeeks(list)
-                  requestAnimationFrame(() => scrollToWeek(format(base, 'yyyy-MM-dd')))
                 }}
               >
-                오늘
+                이번달
               </Button>
             </div>
             {examMetaLabel ? <div className="text-[11px] text-slate-600">{examMetaLabel}</div> : null}
@@ -848,91 +580,36 @@ export function CalendarView() {
             variant="secondary"
             onClick={() => {
               const nextMonth = format(addMonths(parseISO(`${displayMonth}-01`), 1), 'yyyy-MM')
-              const weekStart = nearestMonthStartWeek(`${nextMonth}-01`)
-              ensureWeekInWindow(weekStart)
-              requestAnimationFrame(() => scrollToWeek(weekStart))
+              setDisplayMonth(nextMonth)
             }}
           >
-            {nextMonthLabel}
+            다음
           </Button>
         }
       />
 
-      <div className="hidden">
-        <Card>
-          <div className="hidden items-center justify-between gap-2 px-4 py-3 md:flex">
-            <div className="flex flex-col gap-0.5">
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="secondary"
-                  onClick={() => {
-                    const prevMonth = format(addMonths(parseISO(`${displayMonth}-01`), -1), 'yyyy-MM')
-                    const weekStart = nearestMonthStartWeek(`${prevMonth}-01`)
-                    ensureWeekInWindow(weekStart)
-                    requestAnimationFrame(() => scrollToWeek(weekStart))
-                  }}
-                >
-                  이전
-                </Button>
-                <div className="text-sm font-semibold text-slate-900">{displayMonth}</div>
-                <Button
-                  variant="secondary"
-                  onClick={() => {
-                    const nextMonth = format(addMonths(parseISO(`${displayMonth}-01`), 1), 'yyyy-MM')
-                    const weekStart = nearestMonthStartWeek(`${nextMonth}-01`)
-                    ensureWeekInWindow(weekStart)
-                    requestAnimationFrame(() => scrollToWeek(weekStart))
-                  }}
-                >
-                  다음
-                </Button>
-              </div>
-              {examMetaLabel ? <div className="text-[11px] text-slate-600">{examMetaLabel}</div> : null}
+      <div
+        className="mt-2 flex-1 overflow-y-auto md:mt-3"
+        style={{
+          WebkitOverflowScrolling: 'touch',
+          overscrollBehaviorY: 'contain',
+        }}
+      >
+        {/* Sticky weekday header */}
+        <div className="sticky top-0 z-20 grid grid-cols-7 border-b border-slate-100 bg-slate-50 text-xs font-medium text-slate-600">
+          {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d) => (
+            <div key={d} className="px-1 py-2 md:px-2">
+              {d}
             </div>
-            <Button
-              variant="secondary"
-              onClick={() => {
-                const now = format(new Date(), 'yyyy-MM')
-                setDisplayMonth(now)
-                const base = startOfWeek(parseISO(`${now}-01`), { weekStartsOn: 0 })
-                const list: string[] = []
-                for (let i = -2; i <= 14; i += 1) list.push(format(addDays(base, i * 7), 'yyyy-MM-dd'))
-                setWeeks(list)
-                requestAnimationFrame(() => scrollToWeek(format(base, 'yyyy-MM-dd')))
-              }}
-            >
-              오늘
-            </Button>
-          </div>
-        </Card>
-      </div>
+          ))}
+        </div>
 
-	      <div
-	        ref={scrollRef}
-	        className="mt-2 flex-1 overflow-y-auto scroll-smooth md:mt-3"
-	        style={{ scrollSnapType: 'y proximity' }}
-	      >
-	        {/* Sticky weekday header */}
-	        <div
-	          ref={weekdayHeaderRef}
-	          className="sticky top-0 z-20 grid grid-cols-7 border-b border-slate-100 bg-slate-50 text-xs font-medium text-slate-600"
-	        >
-	          {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d) => (
-	            <div key={d} className="px-1 py-2 md:px-2">
-	              {d}
-	            </div>
-	          ))}
-	        </div>
-
-        {weeks.map((weekStart) => {
+        {monthWeeks.map((weekStart) => {
           const weekStartDate = parseISO(weekStart)
           const days = Array.from({ length: 7 }, (_, i) => format(addDays(weekStartDate, i), 'yyyy-MM-dd'))
           return (
             <div
               key={weekStart}
-              ref={(el) => {
-                weekSectionRefs.current[weekStart] = el
-              }}
               className="grid grid-cols-7 scroll-mt-10"
             >
               {days.map((ymd) => {
@@ -992,17 +669,17 @@ export function CalendarView() {
                             const sub = subjects.find((s) => s.id === t.subjectId)
                             const dday = formatDday(t.dueDate)
                             const hasActual = typeof t.actualSeconds === 'number' && Number.isFinite(t.actualSeconds)
-                            const secondsToShow = hasActual ? (t.actualSeconds as number) : t.plannedSeconds
-                            const timeLabelKo = formatRoundedDurationKoFromSeconds(secondsToShow)
-                            const timeLabelShort = formatRoundedDurationShortFromSeconds(secondsToShow)
+                            const hasAnyRecord = Boolean(t.actualStartTime || t.actualEndTime || hasActual)
+                            const isCompleted = t.status === 'completed' || hasAnyRecord
+                            const goalLabelKo = formatRoundedDurationKoFromSeconds(t.plannedSeconds)
                             const bg = sub?.color ?? '#94a3b8'
                             const textColor = pickReadableTextColor(bg)
-                            const mobileMetaText = dday ? dday : timeLabelShort
-                            const desktopMetaText = `${timeLabelKo}${dday ? ` ${dday}` : ''}`
+
+                            const desktopTagText = isCompleted ? '✓' : dday ? dday : t.plannedSeconds > 0 ? goalLabelKo : null
                             const mobileMaxUnits = 14
                             const desktopMaxUnits = 22
-                            const titleMaxUnitsMobile = mobileMaxUnits - measureUnits(mobileMetaText) - 1
-                            const titleMaxUnitsDesktop = desktopMaxUnits - measureUnits(desktopMetaText) - 1
+                            const titleMaxUnitsMobile = mobileMaxUnits
+                            const titleMaxUnitsDesktop = desktopMaxUnits - measureUnits(desktopTagText ?? '') - 1
                             const titleMobile = truncateToUnits(t.title, titleMaxUnitsMobile)
                             const titleDesktop = truncateToUnits(t.title, titleMaxUnitsDesktop)
                             return (
@@ -1019,7 +696,7 @@ export function CalendarView() {
                                   e.dataTransfer.effectAllowed = 'move'
                                 }}
                                 onDragEnd={() => setDragOverDate(null)}
-                                className="box-border block w-full rounded-[3px] py-1 pl-1.5 pr-0 text-left text-[10px] leading-none hover:brightness-95 active:cursor-grabbing md:pl-2"
+                                className="box-border block w-full select-none rounded-[3px] py-1 pl-1.5 pr-0 text-left text-[10px] leading-none hover:brightness-95 active:cursor-grabbing md:pl-2"
                                 style={{
                                   background: bg,
                                   color: textColor,
@@ -1030,25 +707,22 @@ export function CalendarView() {
                                     <span className="md:hidden">{titleMobile}</span>
                                     <span className="hidden md:inline">{titleDesktop}</span>
                                   </span>
-                                  <span className="shrink-0 tabular-nums text-[9px] leading-none tracking-tighter">
-                                    {!dday ? (
-                                      <span
-                                        className={`bg-white/60 px-1 py-[1px] text-slate-700 md:hidden ${hasActual ? 'font-semibold text-slate-900' : ''}`}
-                                      >
-                                        {timeLabelShort}
-                                      </span>
-                                    ) : null}
-                                    <span
-                                      className={`hidden bg-white/60 px-1 py-[1px] text-slate-700 md:inline ${hasActual ? 'font-semibold text-slate-900' : ''}`}
-                                    >
-                                      {timeLabelKo}
+                                  {isCompleted ? (
+                                    <span className="shrink-0 tabular-nums text-[9px] font-semibold leading-none tracking-tighter md:hidden">
+                                      <span className="bg-white/60 px-1 py-[1px] text-slate-900">✓</span>
                                     </span>
-                                    {dday ? (
-                                      <span className="ml-1 bg-white/60 px-1 py-[1px] font-semibold text-indigo-700">
-                                        {dday}
+                                  ) : null}
+                                  {desktopTagText ? (
+                                    <span className="hidden shrink-0 tabular-nums text-[9px] font-semibold leading-none tracking-tighter md:inline">
+                                      <span
+                                        className={`bg-white/60 px-1 py-[1px] ${
+                                          isCompleted ? 'text-slate-900' : dday ? 'text-indigo-700' : 'text-slate-700'
+                                        }`}
+                                      >
+                                        {desktopTagText}
                                       </span>
-                                    ) : null}
-                                  </span>
+                                    </span>
+                                  ) : null}
                                 </div>
                               </button>
                             )
@@ -1267,7 +941,7 @@ export function CalendarView() {
 		            <StartPendingBubbleIcon />
 		          </button>
 
-          {startPopupEverOpened ? (
+          {startOpen ? (
             <div
 	              className={`flex h-full flex-col transition-[opacity,transform] duration-110 ease-out ${
 	                startOpen ? 'translate-y-0 opacity-100' : 'pointer-events-none translate-y-1 opacity-0'
@@ -1359,28 +1033,33 @@ export function CalendarView() {
 	                                const titleMobile = truncateToUnits(t.title, titleMaxUnitsMobile)
 	                                const titleDesktop = truncateToUnits(t.title, titleMaxUnitsDesktop)
 	                                return (
-	                                  <button
+                                  <div
                                     key={t.id}
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation()
-                                      openPreviewTask(t.id)
-                                    }}
-                                    draggable
-                                    onDragStart={(e) => {
-                                      e.dataTransfer.setData('text/emma-task-id', t.id)
-                                      e.dataTransfer.effectAllowed = 'move'
-                                    }}
-                                    onDragEnd={() => setDragOverDate(null)}
-                                    className="box-border block w-full overflow-hidden rounded-[3px] py-1 pl-1.5 pr-0 text-left text-[10px] leading-none hover:brightness-95 active:cursor-grabbing"
-                                    style={{ background: bg, color: textColor }}
+                                    className="relative w-full"
                                   >
-                                    <div className="flex items-center justify-between gap-1">
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        openPreviewTask(t.id)
+                                      }}
+                                      draggable
+                                      onDragStart={(e) => {
+                                        e.dataTransfer.setData('text/emma-task-id', t.id)
+                                        e.dataTransfer.effectAllowed = 'move'
+                                      }}
+                                      onDragEnd={() => setDragOverDate(null)}
+                                      className="box-border block w-full select-none overflow-hidden rounded-[3px] py-1 pl-1.5 pr-10 text-left text-[10px] leading-none hover:brightness-95 active:cursor-grabbing"
+                                      style={{ background: bg, color: textColor }}
+                                    >
                                       <span className="min-w-0 overflow-hidden whitespace-nowrap">
                                         <span className="md:hidden">{titleMobile}</span>
                                         <span className="hidden md:inline">{titleDesktop}</span>
                                       </span>
-                                      <span className="shrink-0 tabular-nums text-[9px] leading-none tracking-tighter">
+                                    </button>
+
+                                    <div className="pointer-events-none absolute right-0 top-1/2 -translate-y-1/2 pr-1">
+                                      <span className="tabular-nums text-[9px] leading-none tracking-tighter">
                                         {!dday ? (
                                           <span
                                             className={`bg-white/60 px-1 py-[1px] text-slate-700 md:hidden ${hasActual ? 'font-semibold text-slate-900' : ''}`}
@@ -1398,7 +1077,7 @@ export function CalendarView() {
                                         ) : null}
                                       </span>
                                     </div>
-	                                  </button>
+                                  </div>
 	                                )
 	                                    })}
 	                                  </div>

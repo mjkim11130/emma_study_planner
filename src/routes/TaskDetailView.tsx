@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Button, Card, CardHeader, Input } from '../components/ui'
+import { DurationPickerButton } from '../components/DurationPicker'
 import { formatHmsFromSeconds } from '../lib/time'
 import { usePlannerStore } from '../store/usePlannerStore'
 import { MobileTopBar } from '../components/MobileTopBar'
@@ -394,9 +395,9 @@ export function TaskDetailView() {
               className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-400"
             />
           </div>
-            <div className="flex flex-col gap-2">
-              <div className="flex items-center justify-between gap-2">
-                <div className="text-xs font-semibold text-slate-600">목표 소요시간</div>
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-xs font-semibold text-slate-600">목표 소요시간</div>
               <button
                 type="button"
                 onClick={() => updateTask(task.id, { plannedSeconds: 0 })}
@@ -404,35 +405,19 @@ export function TaskDetailView() {
               >
                 삭제
               </button>
-              </div>
-            <div className="grid grid-cols-3 gap-2">
-              <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2">
-                <input
-                  type="number"
-                  min={0}
-                  value={plannedHours}
-                  onChange={(e) => {
-                    const nextHours = clampInt(e.target.value, 0, 999)
-                    updateTask(task.id, { plannedSeconds: nextHours * 3600 + plannedMinutes * 60 + plannedSecondsOnly })
-                  }}
-                  className="w-full min-w-0 bg-transparent text-sm text-slate-900 outline-none"
-                />
-                <span className="shrink-0 text-xs font-semibold text-slate-500">시간</span>
-              </label>
-              <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2">
-                <input
-                  type="number"
-                  min={0}
-                  max={59}
-                  value={plannedMinutes}
-                  onChange={(e) => {
-                    const nextMinutes = clampInt(e.target.value, 0, 59)
-                    updateTask(task.id, { plannedSeconds: plannedHours * 3600 + nextMinutes * 60 + plannedSecondsOnly })
-                  }}
-                  className="w-full min-w-0 bg-transparent text-sm text-slate-900 outline-none"
-                />
-                <span className="shrink-0 text-xs font-semibold text-slate-500">분</span>
-              </label>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <DurationPickerButton
+                valueSeconds={plannedHours * 3600 + plannedMinutes * 60}
+                onChangeSeconds={(nextSeconds) => updateTask(task.id, { plannedSeconds: nextSeconds + plannedSecondsOnly })}
+                maxHours={99}
+                minuteStep={5}
+                buttonClassName="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-left text-sm font-semibold text-slate-900 outline-none focus:border-slate-400"
+                buttonLabel={plannedSec > 0 ? `${hmsToDurationLabel(plannedHours * 3600 + plannedMinutes * 60)}동안` : '□시간동안'}
+                ariaLabel="목표 소요시간 선택"
+              />
+
               <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2">
                 <input
                   type="number"
