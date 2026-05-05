@@ -1,4 +1,4 @@
-import { addDays, addMonths, differenceInCalendarDays, format, parseISO, startOfWeek } from 'date-fns'
+import { addDays, addMonths, differenceInCalendarDays, differenceInCalendarMonths, format, parseISO, startOfWeek } from 'date-fns'
 import { ko } from 'date-fns/locale'
 import { useContext, useEffect, useMemo, useRef, useState, type ReactNode, type WheelEvent as ReactWheelEvent } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
@@ -43,6 +43,39 @@ function StartPendingBubbleIcon() {
         strokeLinejoin="round"
       />
     </svg>
+  )
+}
+
+function FlagIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className={className ?? 'h-4 w-4'}>
+      <path d="M6 3v18" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+      <path
+        d="M6 4h11l-2 4 2 4H6"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.2"
+        strokeLinejoin="round"
+        strokeLinecap="round"
+      />
+    </svg>
+  )
+}
+
+function GoalPillIcon({ className }: { className?: string }) {
+  return <span aria-hidden="true" className={`inline-block h-3.5 w-3.5 rounded-[4px] border-2 border-current ${className ?? ''}`} />
+}
+
+function RecordPillIcon({ className }: { className?: string }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={`inline-flex h-3.5 w-3.5 items-center justify-center rounded-[4px] bg-white text-slate-900 ${className ?? ''}`}
+    >
+      <svg viewBox="0 0 24 24" className="h-3 w-3">
+        <path d="M20 6L9 17l-5-5" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    </span>
   )
 }
 
@@ -114,15 +147,17 @@ function buildTimeSummaryNode({
   end?: string | null
   durationSeconds?: number | null
 }) {
+  // If the range collapses to the same minute (e.g. 11:41 ~ 11:41), show a single timestamp.
+  if (start && end && start === end) {
+    return <>{formatMeridiemHm(start)}</>
+  }
   const rangeText = start ? (end ? `${formatMeridiemHm(start)}부터 ${formatMeridiemHm(end)}까지` : `${formatMeridiemHm(start)}부터`) : ''
   const durationText = typeof durationSeconds === 'number' ? formatDurationPreciseKo(durationSeconds) : ''
 
   if (rangeText && !end && !durationText) {
     return (
       <>
-        <strong>
-          {rangeText} 시작
-        </strong>
+        {rangeText} 시작
       </>
     )
   }
@@ -130,12 +165,12 @@ function buildTimeSummaryNode({
   if (rangeText && durationText) {
     return (
       <>
-        {rangeText} <strong>{durationText}</strong>
+        {rangeText} {end ? <strong>{durationText}</strong> : durationText}
       </>
     )
   }
 
-  if (durationText) return <strong>{durationText}</strong>
+  if (durationText) return durationText
   return rangeText
 }
 
@@ -169,7 +204,7 @@ function CompareRail({
         <div className="h-3.5 overflow-hidden">
           <div className="h-full rounded-full bg-slate-900" style={{ width: actualWidth }} />
         </div>
-        <span className="text-right text-[15px] font-bold tabular-nums text-slate-900">{actualLabel}</span>
+        <span className="text-right text-[15px] font-semibold tabular-nums text-slate-900">{actualLabel}</span>
       </div>
       <div className="pt-1 text-center text-base font-semibold text-slate-700">{deltaLabel}</div>
     </div>
@@ -196,6 +231,9 @@ export function CalendarView() {
   const [startDock, setStartDock] = useState<{ v: 'top' | 'bottom'; h: 'right' }>({ v: 'bottom', h: 'right' })
   const [topDockY, setTopDockY] = useState<number>(() => 64)
   const isAdjustingMonthsRef = useRef(false)
+  const scrollGestureStartMonthRef = useRef<string | null>(null)
+  const lastWheelAtRef = useRef(0)
+  const strongWheelAccumRef = useRef<{ at: number; sum: number }>({ at: 0, sum: 0 })
   const scrollSnapTimerRef = useRef<number | null>(null)
   const scrollAnimRef = useRef<number | null>(null)
   const dragRef = useRef<{
@@ -383,7 +421,8 @@ export function CalendarView() {
     const hasCompare = typeof previewTask.actualSeconds === 'number' && previewTask.plannedSeconds > 0
     const items: Array<{ kind: '목표' | '기록'; badge: string; text: ReactNode; key: string }> = []
 
-    if (previewTask.plannedStartTime || previewTask.plannedSeconds > 0) {
+    // Only show "목표" if we have a concrete start time to display.
+    if (previewTask.plannedStartTime) {
       const plannedText = hasCompare
         ? buildTimeSummaryNode({ start: previewTask.plannedStartTime, end: previewPlannedEnd, durationSeconds: null })
         : buildTimeSummaryNode({
@@ -579,6 +618,50 @@ export function CalendarView() {
     if (!root) return
 
     let raf = 0
+    const jumpToMonth = (deltaMonths: number) => {
+      const base = parseISO(`${displayMonth}-01`)
+      const targetMonth = format(addMonths(base, deltaMonths), 'yyyy-MM')
+      const monthStartWeek = nearestMonthStartWeek(`${targetMonth}-01`)
+      isAdjustingMonthsRef.current = true
+      ensureWeekInWindow(monthStartWeek)
+      setDisplayMonth(targetMonth)
+      requestAnimationFrame(() => {
+        scrollToWeek(monthStartWeek)
+        window.setTimeout(() => {
+          isAdjustingMonthsRef.current = false
+        }, 320)
+      })
+    }
+
+    const onWheel = (e: WheelEvent) => {
+      // Track a "gesture" start month so momentum scrolling can't skip more than 1 month.
+      const now = Date.now()
+      if (now - lastWheelAtRef.current > 260) scrollGestureStartMonthRef.current = displayMonth
+      lastWheelAtRef.current = now
+
+      // If the wheel input is strong enough, interpret it as "go prev/next month"
+      // and don't perform the native scroll.
+      // Trackpads often emit many small deltas; we also accumulate briefly.
+      const dy = e.deltaY
+      const absDy = Math.abs(dy)
+      const absDx = Math.abs(e.deltaX)
+      if (absDx > absDy) return
+
+      const prev = strongWheelAccumRef.current
+      const within = now - prev.at < 90
+      const sum = (within ? prev.sum : 0) + absDy
+      strongWheelAccumRef.current = { at: now, sum }
+
+      const isStrong = absDy >= 120 || sum >= 220
+      if (!isStrong) return
+
+      e.preventDefault()
+      e.stopPropagation()
+      strongWheelAccumRef.current = { at: 0, sum: 0 }
+      scrollGestureStartMonthRef.current = displayMonth
+      jumpToMonth(dy > 0 ? 1 : -1)
+    }
+
     const onScroll = () => {
       cancelAnimationFrame(raf)
       raf = window.requestAnimationFrame(() => {
@@ -644,25 +727,69 @@ export function CalendarView() {
         }
         if (bestPx / visibleHeight >= 0.5 && bestMonth !== displayMonth) setDisplayMonth(bestMonth)
 
-        // Soft snap to month boundary when scroll settles and we're near a boundary.
+        // Snap when scroll settles:
+        // - Always snap to the nearest week row (so the grid "sticks" under the weekday header).
+        // - Clamp momentum so we can't skip more than 1 month per gesture.
         if (scrollSnapTimerRef.current) window.clearTimeout(scrollSnapTimerRef.current)
         scrollSnapTimerRef.current = window.setTimeout(() => {
-          const current = bestMonth
-          const monthStartWeek = nearestMonthStartWeek(`${current}-01`)
-          const el = weekSectionRefs.current[monthStartWeek]
-          if (!el) return
-          const rect = el.getBoundingClientRect()
-          const distance = rect.top - visibleTop
-          if (Math.abs(distance) < 160) scrollToWeek(monthStartWeek)
+          if (isAdjustingMonthsRef.current) return
+
+          // If no recent wheel input, don't clamp month changes (e.g. programmatic scrollToWeek).
+          const gestureStartMonth = Date.now() - lastWheelAtRef.current < 650 ? scrollGestureStartMonthRef.current : null
+
+          // Find the week row whose top is closest to the visible top edge.
+          let bestWeek = weeks[0]
+          let bestDist = Number.POSITIVE_INFINITY
+          for (const w of weeks) {
+            const el = weekSectionRefs.current[w]
+            if (!el) continue
+            const rect = el.getBoundingClientRect()
+            const d = Math.abs(rect.top - visibleTop)
+            if (d < bestDist) {
+              bestDist = d
+              bestWeek = w
+            }
+          }
+
+          // Clamp by month (max +/- 1 month from gesture start), then snap to that month boundary.
+          if (gestureStartMonth) {
+            const start = parseISO(`${gestureStartMonth}-01`)
+            const target = parseISO(`${bestMonth}-01`)
+            const diff = differenceInCalendarMonths(target, start)
+            if (diff > 1) {
+              const clamped = format(addMonths(start, 1), 'yyyy-MM')
+              const monthStartWeek = nearestMonthStartWeek(`${clamped}-01`)
+              ensureWeekInWindow(monthStartWeek)
+              setDisplayMonth(clamped)
+              requestAnimationFrame(() => scrollToWeek(monthStartWeek))
+              return
+            }
+            if (diff < -1) {
+              const clamped = format(addMonths(start, -1), 'yyyy-MM')
+              const monthStartWeek = nearestMonthStartWeek(`${clamped}-01`)
+              ensureWeekInWindow(monthStartWeek)
+              setDisplayMonth(clamped)
+              requestAnimationFrame(() => scrollToWeek(monthStartWeek))
+              return
+            }
+          }
+
+          // Week snapping: stick the nearest week to the top.
+          if (bestWeek) {
+            ensureWeekInWindow(bestWeek)
+            scrollToWeek(bestWeek)
+          }
         }, 160)
       })
     }
 
+    root.addEventListener('wheel', onWheel, { passive: false })
     root.addEventListener('scroll', onScroll, { passive: true })
     return () => {
       cancelAnimationFrame(raf)
       if (scrollSnapTimerRef.current) window.clearTimeout(scrollSnapTimerRef.current)
       if (scrollAnimRef.current) window.cancelAnimationFrame(scrollAnimRef.current)
+      root.removeEventListener('wheel', onWheel)
       root.removeEventListener('scroll', onScroll)
     }
   }, [weeks, displayMonth])
@@ -812,6 +939,8 @@ export function CalendarView() {
                     const dayMonth = ymd.slice(0, 7)
                     const isCurrentMonth = dayMonth === displayMonth
                     const isToday = ymd === todayYmd()
+                    const dayNum = Number(ymd.slice(8, 10))
+                    const monthNum = Number(ymd.slice(5, 7))
                     const cellTasks = (tasksByDate.get(ymd) ?? [])
                       .slice()
                       .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
@@ -849,8 +978,13 @@ export function CalendarView() {
                       >
                         <div className="flex w-full items-center justify-between gap-1">
                           <div className={`text-xs font-semibold ${isCurrentMonth ? 'text-slate-900' : 'text-slate-400'}`}>
-                            {Number(ymd.slice(8, 10))}
+                            {dayNum}
                           </div>
+                          {dayNum === 1 ? (
+                            <div className={`text-[11px] font-semibold ${isCurrentMonth ? 'text-slate-600' : 'text-slate-400'}`}>
+                              {monthNum}월
+                            </div>
+                          ) : null}
                         </div>
 
                         <div className="-mx-1.5 mt-1 flex flex-col overflow-x-visible overflow-y-hidden max-h-[96px] divide-y divide-slate-200 md:-mx-2 md:max-h-[112px]">
@@ -1006,6 +1140,9 @@ export function CalendarView() {
                       {previewTask.dueDate ? (
                         <div className="flex flex-nowrap items-center gap-2.5 text-base font-medium text-indigo-700">
                           <span className="rounded-full bg-indigo-50 px-3 py-1.5 text-sm font-semibold text-indigo-700">
+                            <span className="mr-1.5 inline-flex align-middle">
+                              <FlagIcon className="h-4 w-4" />
+                            </span>
                             {formatDday(previewTask.dueDate)}
                           </span>
                           <span className="min-w-0 whitespace-nowrap tracking-[-0.02em] md:tracking-[-0.03em] text-indigo-700">
@@ -1026,6 +1163,9 @@ export function CalendarView() {
                                 item.kind === '기록' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-500'
                               }`}
                             >
+                              <span className="mr-1.5 inline-flex align-middle">
+                                {item.kind === '기록' ? <RecordPillIcon /> : <GoalPillIcon />}
+                              </span>
                               {item.badge}
                             </span>
                             {item.text ? (
