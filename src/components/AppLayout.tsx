@@ -10,6 +10,44 @@ import { SubjectDialog } from './SubjectDialog'
 
 export const SidebarToggleContext = createContext<{ open: boolean; toggle: () => void } | null>(null)
 
+function IconCalendarMonth() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true">
+      <path
+        d="M19 4h-1V2h-2v2H8V2H6v2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V10h14v10zm0-12H5V6h14v2z"
+        fill="currentColor"
+      />
+    </svg>
+  )
+}
+
+function IconCalendarViewDay() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true">
+      <path d="M3 5h18v2H3V5zm0 4h7v10H3V9zm9 0h9v2h-9V9zm0 4h9v2h-9v-2zm0 4h9v2h-9v-2z" fill="currentColor" />
+    </svg>
+  )
+}
+
+function IconFolder() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true">
+      <path d="M10 4l2 2h8c1.1 0 2 .9 2 2v10c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2h6z" fill="currentColor" />
+    </svg>
+  )
+}
+
+function IconSettings() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true">
+      <path
+        d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58c.18-.14.23-.4.12-.61l-1.92-3.32c-.11-.21-.36-.3-.58-.22l-2.39.96c-.5-.38-1.04-.69-1.63-.92l-.36-2.54A.5.5 0 0 0 14.3 1h-4.6a.5.5 0 0 0-.49.42l-.36 2.54c-.59.23-1.13.54-1.63.92l-2.39-.96c-.22-.09-.47.01-.58.22L1.33 9.46c-.11.21-.06.47.12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58c-.18.14-.23.4-.12.61l1.92 3.32c.11.21.36.3.58.22l2.39-.96c.5.38 1.04.69 1.63.92l.36 2.54c.04.24.25.42.49.42h4.6c.24 0 .45-.18.49-.42l.36-2.54c.59-.23 1.13-.54 1.63-.92l2.39.96c.22.09.47-.01.58-.22l1.92-3.32c.11-.21.06-.47-.12-.61l-2.03-1.58zM12 15.5A3.5 3.5 0 1 1 12 8a3.5 3.5 0 0 1 0 7.5z"
+        fill="currentColor"
+      />
+    </svg>
+  )
+}
+
 const normalizeHex = (color: string) => {
   const raw = color.trim()
   const hex = raw.startsWith('#') ? raw.slice(1) : raw
@@ -50,15 +88,21 @@ function truncateText(s: string, max: number) {
   return s.slice(0, max)
 }
 
-function NavItem({ to, label }: { to: string; label: string }) {
+function NavItem({ to, label, icon, active }: { to: string; label: string; icon: ReactNode; active?: boolean }) {
   return (
     <NavLink
       to={to}
-      className={({ isActive }) =>
-        `rounded-xl px-3 py-2 text-sm font-medium ${isActive ? 'bg-slate-900 text-white' : 'text-slate-700 hover:bg-slate-100'}`
-      }
+      className={({ isActive }) => {
+        const on = typeof active === 'boolean' ? active : isActive
+        return `flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm font-semibold transition ${
+          on ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+        }`
+      }}
     >
-      {label}
+      <span className="inline-flex h-6 w-6 items-center justify-center" aria-hidden="true">
+        {icon}
+      </span>
+      <span className="truncate">{label}</span>
     </NavLink>
   )
 }
@@ -180,10 +224,10 @@ export function AppLayout() {
           <div className={`grid h-full w-full grid-cols-1 ${sidebarOpen ? 'md:grid-cols-[260px_1fr]' : 'md:grid-cols-[1fr]'}`}>
             <aside className={`${sidebarOpen ? 'md:flex' : 'md:hidden'} hidden border-r border-slate-200 bg-white p-3 md:min-h-0 md:flex-col`}>
             <div className="px-2 py-2 text-sm font-semibold text-slate-900">엠마 스터디플래너</div>
-            <div className="mt-2 rounded-2xl border border-slate-200 bg-white p-2">
-              <div className="text-[11px] font-semibold text-slate-600">현재 시즌</div>
+            <div className="mt-2 rounded-3xl border border-slate-200 bg-white p-3 shadow-[0_10px_30px_rgba(15,23,42,0.06)]">
+              <div className="text-[11px] font-semibold text-slate-500">현재 시즌</div>
               <select
-                className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-400"
+                className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 outline-none focus:border-slate-400"
                 value={activeExamId}
                 onChange={(e) => setActiveExam(e.target.value)}
               >
@@ -196,20 +240,13 @@ export function AppLayout() {
                 ))}
               </select>
             </div>
-            <div className="mt-2 flex flex-col gap-1">
-              <NavItem to="calendar" label="월별" />
-              <NavLink
-                to={`/day/${todayYmd()}`}
-                className={() =>
-                  `rounded-xl px-3 py-2 text-sm font-medium ${isDayPage ? 'bg-slate-900 text-white' : 'text-slate-700 hover:bg-slate-100'}`
-                }
-              >
-                일별
-              </NavLink>
-              <NavItem to="dashboard" label="주제별" />
-              <NavItem to="settings" label="설정" />
+            <div className="mt-3 flex flex-col gap-1.5">
+              <NavItem to="calendar" label="월별" icon={<IconCalendarMonth />} />
+              <NavItem to={`/day/${todayYmd()}`} label="일별" icon={<IconCalendarViewDay />} active={isDayPage} />
+              <NavItem to="dashboard" label="주제" icon={<IconFolder />} />
+              <NavItem to="settings" label="설정" icon={<IconSettings />} />
             </div>
-            <div className="mt-6 rounded-2xl bg-slate-50 p-3 text-xs text-slate-600">
+            <div className="mt-5 rounded-3xl bg-slate-50 p-3 text-xs font-medium text-slate-600">
               목표시간 vs 실제시간을 비교 기록하세요.
             </div>
 
