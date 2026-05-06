@@ -1,4 +1,4 @@
-import { createContext, useEffect, useMemo, useState } from 'react'
+import { createContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { usePlannerStore } from '../store/usePlannerStore'
 import { formatDurationKoFromSeconds } from '../lib/time'
@@ -459,20 +459,55 @@ export function AppLayout() {
             </main>
           </div>
           {!hideBottom ? (
-            <div className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/95 backdrop-blur md:hidden">
+            <div className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/95 shadow-[0_-12px_40px_rgba(15,23,42,0.08)] backdrop-blur md:hidden">
               <div style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
-                <div className="mx-auto grid max-w-xl grid-cols-4 px-3 py-3 text-sm">
-                  <BottomNavItem to="calendar" label="월별" />
-                  <NavLink
-                    to={`/day/${todayYmd()}`}
-                    className={() =>
-                      `mx-1 rounded-2xl px-3 py-4 text-center font-semibold ${isDayPage ? 'bg-slate-900 text-white' : 'text-slate-700'}`
+                <div className="mx-auto grid max-w-xl grid-cols-4 px-2 pb-2 pt-2">
+                  <BottomNavItem
+                    to="calendar"
+                    label="월별"
+                    icon={
+                      <svg viewBox="0 0 24 24" className="h-6 w-6" aria-hidden="true">
+                        <path
+                          d="M19 4h-1V2h-2v2H8V2H6v2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V10h14v10zm0-12H5V6h14v2z"
+                          fill="currentColor"
+                        />
+                      </svg>
                     }
-                  >
-                    일별
-                  </NavLink>
-                  <BottomNavItem to="dashboard" label="주제별" />
-                  <BottomNavItem to="settings" label="설정" />
+                  />
+                  <BottomNavItem
+                    to={`/day/${todayYmd()}`}
+                    label="일별"
+                    active={isDayPage}
+                    icon={
+                      <svg viewBox="0 0 24 24" className="h-6 w-6" aria-hidden="true">
+                        <path
+                          d="M3 5h18v2H3V5zm0 4h7v10H3V9zm9 0h9v2h-9V9zm0 4h9v2h-9v-2zm0 4h9v2h-9v-2z"
+                          fill="currentColor"
+                        />
+                      </svg>
+                    }
+                  />
+                  <BottomNavItem
+                    to="dashboard"
+                    label="주제"
+                    icon={
+                      <svg viewBox="0 0 24 24" className="h-6 w-6" aria-hidden="true">
+                        <path d="M10 4l2 2h8c1.1 0 2 .9 2 2v10c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2h6z" fill="currentColor" />
+                      </svg>
+                    }
+                  />
+                  <BottomNavItem
+                    to="settings"
+                    label="설정"
+                    icon={
+                      <svg viewBox="0 0 24 24" className="h-6 w-6" aria-hidden="true">
+                        <path
+                          d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58c.18-.14.23-.4.12-.61l-1.92-3.32c-.11-.21-.36-.3-.58-.22l-2.39.96c-.5-.38-1.04-.69-1.63-.92l-.36-2.54A.5.5 0 0 0 14.3 1h-4.6a.5.5 0 0 0-.49.42l-.36 2.54c-.59.23-1.13.54-1.63.92l-2.39-.96c-.22-.09-.47.01-.58.22L1.33 9.46c-.11.21-.06.47.12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58c-.18.14-.23.4-.12.61l1.92 3.32c.11.21.36.3.58.22l2.39-.96c.5.38 1.04.69 1.63.92l.36 2.54c.04.24.25.42.49.42h4.6c.24 0 .45-.18.49-.42l.36-2.54c.59-.23 1.13-.54 1.63-.92l2.39.96c.22.09.47-.01.58-.22l1.92-3.32c.11-.21.06-.47-.12-.61l-2.03-1.58zM12 15.5A3.5 3.5 0 1 1 12 8a3.5 3.5 0 0 1 0 7.5z"
+                          fill="currentColor"
+                        />
+                      </svg>
+                    }
+                  />
                 </div>
               </div>
             </div>
@@ -499,10 +534,48 @@ export function AppLayout() {
   )
 }
 
-function BottomNavItem({ to, label }: { to: string; label: string }) {
+function BottomNavItem({
+  to,
+  label,
+  icon,
+  active,
+}: {
+  to: string
+  label: string
+  icon: ReactNode
+  active?: boolean
+}) {
   return (
-    <NavLink to={to} className={({ isActive }) => `mx-1 rounded-2xl px-3 py-4 text-center font-semibold ${isActive ? 'bg-slate-900 text-white' : 'text-slate-700'}`}>
-      {label}
+    <NavLink
+      to={to}
+      className={({ isActive }) => {
+        const on = typeof active === 'boolean' ? active : isActive
+        return `group relative mx-1 flex h-[56px] flex-col items-center justify-center gap-1 rounded-2xl px-2 ${
+          on ? 'text-slate-900' : 'text-slate-400'
+        }`
+      }}
+    >
+      {({ isActive }) => {
+        const on = typeof active === 'boolean' ? active : isActive
+        return (
+          <>
+            <div
+              className={`flex h-7 w-12 items-center justify-center rounded-2xl transition ${
+                on ? 'bg-slate-900/5' : 'group-hover:bg-slate-900/5'
+              }`}
+            >
+              {icon}
+            </div>
+            <div className={`text-[11px] font-semibold tracking-tight ${on ? 'text-slate-900' : 'text-slate-400'}`}>{label}</div>
+            <div
+              className={`absolute bottom-0 h-1 w-10 rounded-full bg-slate-900 transition-opacity ${
+                on ? 'opacity-100' : 'opacity-0'
+              }`}
+              aria-hidden="true"
+            />
+          </>
+        )
+      }}
     </NavLink>
   )
 }
