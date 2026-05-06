@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
-import { Button, Card, CardHeader, Input, Select } from '../components/ui'
+import { useNavigate } from 'react-router-dom'
+import { Button, Card, CardHeader, Input } from '../components/ui'
 import { usePlannerStore } from '../store/usePlannerStore'
 import { useAuth } from '../auth/AuthContext'
 import { getSupabase, supabaseConfigOk } from '../lib/supabaseClient'
 import { MobileTopBar } from '../components/MobileTopBar'
+import { TimePickerModal } from '../components/TimePicker'
+import { exportSeasonTasksToXlsx } from '../lib/excelExport'
 
 function hmToMinutesLocal(hm?: string) {
   if (!hm) return null
@@ -22,6 +24,17 @@ function minutesToHm(min: number) {
   const h = Math.floor(clamped / 60)
   const m = clamped % 60
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+}
+
+function formatMeridiemHm(hm: string) {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(hm)
+  if (!match) return hm
+  const hours24 = Number(match[1])
+  const minutes = Number(match[2])
+  if (!Number.isFinite(hours24) || !Number.isFinite(minutes)) return hm
+  const meridiem = hours24 < 12 ? '오전' : '오후'
+  const hours12 = hours24 % 12 === 0 ? 12 : hours24 % 12
+  return `${meridiem} ${String(hours12).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`
 }
 
 function snap10(min: number) {
@@ -62,41 +75,40 @@ export function SettingsView() {
   const { user } = useAuth()
   const exams = usePlannerStore((s) => s.exams)
   const activeExamId = usePlannerStore((s) => s.activeExamId)
-  const activeExam = usePlannerStore(useMemo(() => (s) => s.exams.find((e) => e.id === activeExamId), [activeExamId]))
   const setActiveExam = usePlannerStore((s) => s.setActiveExam)
   const addExam = usePlannerStore((s) => s.addExam)
   const updateExam = usePlannerStore((s) => s.updateExam)
-  const setExamStatus = usePlannerStore((s) => s.setExamStatus)
   const deleteExam = usePlannerStore((s) => s.deleteExam)
   const resetAll = usePlannerStore((s) => s.resetAll)
+  const subjects = usePlannerStore((s) => s.subjects)
+  const tasks = usePlannerStore((s) => s.tasks)
 
-  const debug = useMemo(() => {
-    const lastUserId = (() => {
-      try {
-        return window.localStorage.getItem('emma-study-planner:lastUserId')
-      } catch {
-        return null
-      }
-    })()
-    const hasPlannerLocal = (() => {
-      try {
-        return window.localStorage.getItem('emma-study-planner:v1') !== null
-      } catch {
-        return null
-      }
-    })()
-    return { lastUserId, hasPlannerLocal }
-  }, [])
-  const buildId = (globalThis as any).__BUILD_ID__ as string | undefined
-
-  const [newExamName, setNewExamName] = useState('')
   const activeExams = useMemo(() => exams.filter((e) => e.status === 'active'), [exams])
-  const archivedExams = useMemo(() => exams.filter((e) => e.status === 'archived'), [exams])
 
   const [defaultTimelineWindow, setDefaultTimelineWindow] = useState<TimelineWindow>(() => loadDefaultTimelineWindow())
   useEffect(() => {
     saveDefaultTimelineWindow(defaultTimelineWindow)
   }, [defaultTimelineWindow])
+
+  const [timelinePickerOpen, setTimelinePickerOpen] = useState(false)
+  const [timelinePickerField, setTimelinePickerField] = useState<'start' | 'end'>('start')
+
+  const [examEditorOpen, setExamEditorOpen] = useState(false)
+  const [examEditorMode, setExamEditorMode] = useState<'add' | 'edit'>('edit')
+  const [examEditorId, setExamEditorId] = useState<string | null>(null)
+  const editingExam = useMemo(() => exams.find((e) => e.id === examEditorId) ?? null, [exams, examEditorId])
+  const [examEditorName, setExamEditorName] = useState('')
+  const [examEditorDate, setExamEditorDate] = useState<string>('')
+  useEffect(() => {
+    if (!examEditorOpen) return
+    if (examEditorMode === 'edit' && editingExam) {
+      setExamEditorName(editingExam.name ?? '')
+      setExamEditorDate(editingExam.examDate ?? '')
+      return
+    }
+    setExamEditorName('')
+    setExamEditorDate('')
+  }, [examEditorOpen, examEditorMode, editingExam])
 
   return (
     <div className="flex flex-col gap-3">
@@ -105,11 +117,7 @@ export function SettingsView() {
         <CardHeader title="계정" />
         <div className="flex flex-col gap-2 px-4 py-3 md:flex-row md:items-center md:justify-between">
           <div className="flex flex-col gap-1">
-            <div className="text-sm text-slate-700">{user?.email ?? '로그인 사용자'}</div>
-            <div className="text-[11px] text-slate-500">build: {buildId ?? '-'}</div>
-            <div className="text-[11px] text-slate-500">user.id: {user?.id ?? '-'}</div>
-            <div className="text-[11px] text-slate-500">lastUserId: {debug.lastUserId ?? '-'}</div>
-            <div className="text-[11px] text-slate-500">local planner cache: {String(debug.hasPlannerLocal)}</div>
+            <div className="text-sm font-semibold text-slate-900">{user?.email ?? '로그인 사용자'}</div>
           </div>
           <div className="flex flex-col gap-2 md:flex-row md:items-center">
             <Button
@@ -152,153 +160,228 @@ export function SettingsView() {
       </Card>
 
       <Card>
-        <CardHeader title="시험" />
-        <div className="grid grid-cols-1 gap-2 px-4 py-3 md:grid-cols-2">
-          <div>
-            <div className="mb-1 text-xs font-semibold text-slate-600">현재 시험</div>
-            <Select value={activeExamId} onChange={setActiveExam}>
-              {activeExams.map((e) => (
-                <option key={e.id} value={e.id}>
-                  {e.name}
-                </option>
-              ))}
-            </Select>
-          </div>
-          <div>
-            <div className="mb-1 text-xs font-semibold text-slate-600">시험 명 수정</div>
-            <Input
-              value={activeExam?.name ?? ''}
-              onChange={(v) => updateExam(activeExamId, { name: v })}
-              placeholder="시험 이름"
-            />
-          </div>
-        </div>
-      </Card>
-
-      <Card>
-        <CardHeader title="Day 기본 시간대" />
+        <CardHeader title="타임라인 범위" />
         <div className="grid grid-cols-1 gap-3 px-4 py-4 md:grid-cols-[160px_160px_1fr]">
           <div>
-            <div className="mb-1 text-xs font-semibold text-slate-600">기본 시작</div>
-            <input
-              type="time"
-              value={minutesToHm(defaultTimelineWindow.startMin)}
-              onChange={(e) => {
-                const m = hmToMinutesLocal(e.target.value)
-                if (m === null) return
-                const startMin = snap10(m)
-                const endMin = Math.max(startMin + 10, defaultTimelineWindow.endMin)
-                setDefaultTimelineWindow({ startMin, endMin })
+            <div className="mb-1 text-xs font-semibold text-slate-600">시작</div>
+            <button
+              type="button"
+              onClick={() => {
+                setTimelinePickerField('start')
+                setTimelinePickerOpen(true)
               }}
-              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-400"
-            />
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-left text-sm font-semibold text-slate-900 outline-none hover:bg-slate-50 focus:border-slate-400"
+            >
+              {formatMeridiemHm(minutesToHm(defaultTimelineWindow.startMin))}
+            </button>
           </div>
           <div>
-            <div className="mb-1 text-xs font-semibold text-slate-600">기본 종료</div>
-            <input
-              type="time"
-              value={minutesToHm(Math.max(defaultTimelineWindow.startMin + 10, defaultTimelineWindow.endMin))}
-              onChange={(e) => {
-                const m = hmToMinutesLocal(e.target.value)
-                if (m === null) return
-                const endMin = Math.max(defaultTimelineWindow.startMin + 10, snap10(m))
-                setDefaultTimelineWindow({ startMin: defaultTimelineWindow.startMin, endMin })
+            <div className="mb-1 text-xs font-semibold text-slate-600">종료</div>
+            <button
+              type="button"
+              onClick={() => {
+                setTimelinePickerField('end')
+                setTimelinePickerOpen(true)
               }}
-              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-400"
-            />
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-left text-sm font-semibold text-slate-900 outline-none hover:bg-slate-50 focus:border-slate-400"
+            >
+              {formatMeridiemHm(minutesToHm(Math.max(defaultTimelineWindow.startMin + 10, defaultTimelineWindow.endMin)))}
+            </button>
           </div>
-          <div className="text-sm text-slate-600 md:self-end">
-            기본값: <span className="font-semibold">09:00 ~ 24:00</span> (날짜별로는 Day 페이지에서 별도 설정 가능)
-          </div>
+          <div />
         </div>
       </Card>
 
       <Card>
-        <CardHeader title="시험 관리" subtitle="시험 단위로 과목/일정이 분리됩니다." />
-        <div className="grid grid-cols-1 gap-2 px-4 py-3 md:grid-cols-[1fr_120px]">
-          <Input value={newExamName} onChange={setNewExamName} placeholder="예: 2026-1 중간고사" />
+        <CardHeader title="시즌 관리" subtitle="시즌 단위로 주제/일정이 분리됩니다." />
+        <div className="flex items-center justify-between gap-2 px-4 py-3">
+          <div className="text-sm font-semibold text-slate-700">시즌을 1개 선택하면 전체 데이터에 적용됩니다.</div>
           <Button
             onClick={() => {
-              const id = addExam(newExamName)
-              setNewExamName('')
-              setActiveExam(id)
+              setExamEditorMode('add')
+              setExamEditorId(null)
+              setExamEditorOpen(true)
             }}
           >
-            + 시험 추가
+            + 시즌 등록
           </Button>
         </div>
 
-        <div className="divide-y divide-slate-100">
-          {activeExams.length === 0 ? <div className="px-4 py-4 text-sm text-slate-500">진행중 시험이 없어요.</div> : null}
+        <div className="divide-y divide-slate-100 px-2 pb-2">
+          {activeExams.length === 0 ? <div className="px-4 py-4 text-sm text-slate-500">진행중 시즌이 없어요.</div> : null}
           {activeExams.map((e) => (
-            <div key={e.id} className="grid grid-cols-1 gap-2 px-4 py-3 md:grid-cols-[1fr_360px]">
-              <div className="min-w-0">
-                <Link to={`/exams/${e.id}`} className="text-sm font-semibold text-slate-900 hover:underline">
-                  {e.name}
-                </Link>
-                <div className="mt-1 text-xs text-slate-500">ID: {e.id}</div>
-              </div>
-              <div className="grid grid-cols-1 gap-2 md:grid-cols-[1fr_160px_80px_80px_80px]">
-                <Input value={e.name} onChange={(v) => updateExam(e.id, { name: v })} />
-                <input
-                  type="date"
-                  value={e.examDate ?? ''}
-                  onChange={(ev) => updateExam(e.id, { examDate: ev.target.value || undefined })}
-                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-400"
-                />
-                <Button variant="secondary" onClick={() => setActiveExam(e.id)}>
-                  선택
-                </Button>
-                <Button variant="secondary" onClick={() => setExamStatus(e.id, 'archived')}>
-                  보관
+            <div
+              key={e.id}
+              className={`flex items-center justify-between gap-3 rounded-2xl px-3 py-3 transition ${
+                e.id === activeExamId ? 'bg-slate-900 text-white' : 'bg-slate-50 text-slate-900 opacity-60 hover:opacity-100'
+              }`}
+            >
+              <button
+                type="button"
+                onClick={() => setActiveExam(e.id)}
+                className="min-w-0 flex-1 text-left"
+                aria-label="시즌 선택"
+              >
+                <div className="flex min-w-0 items-center gap-2">
+                  <span
+                    className={`inline-flex h-5 w-5 items-center justify-center rounded-full border ${
+                      e.id === activeExamId ? 'border-white/70 bg-white/15' : 'border-slate-300 bg-white'
+                    }`}
+                    aria-hidden="true"
+                  >
+                    {e.id === activeExamId ? <span className="h-2.5 w-2.5 rounded-full bg-white" /> : null}
+                  </span>
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold">{e.name}</div>
+                    <div className={`mt-0.5 text-xs tabular-nums ${e.id === activeExamId ? 'text-white/80' : 'text-slate-500'}`}>
+                      시즌 종료일: {e.examDate ? e.examDate : '-'}
+                    </div>
+                  </div>
+                </div>
+              </button>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="secondary"
+                  onClick={() =>
+                    exportSeasonTasksToXlsx({
+                      seasonId: e.id,
+                      seasonName: e.name,
+                      subjects,
+                      tasks,
+                    })
+                  }
+                >
+                  내보내기
                 </Button>
                 <Button
-                  variant="danger"
+                  variant="secondary"
                   onClick={() => {
-                    const ok = window.confirm('이 시험을 삭제할까요? 해당 시험의 과목/일정도 함께 삭제됩니다.')
-                    if (!ok) return
-                    deleteExam(e.id)
+                    setExamEditorMode('edit')
+                    setExamEditorId(e.id)
+                    setExamEditorOpen(true)
                   }}
                 >
-                  삭제
+                  편집
                 </Button>
               </div>
             </div>
           ))}
         </div>
+      </Card>
 
-        <div className="border-t border-slate-100">
-          <div className="px-4 py-3 text-xs font-semibold text-slate-700">보관함</div>
-          <div className="divide-y divide-slate-100">
-            {archivedExams.length === 0 ? <div className="px-4 py-4 text-sm text-slate-500">보관된 시험이 없어요.</div> : null}
-            {archivedExams.map((e) => (
-              <div key={e.id} className="grid grid-cols-1 gap-2 px-4 py-3 md:grid-cols-[1fr_280px]">
-                <div className="min-w-0">
-                  <Link to={`/exams/${e.id}`} className="text-sm font-semibold text-slate-900 hover:underline">
-                    {e.name}
-                  </Link>
-                  <div className="mt-1 text-xs text-slate-500">ID: {e.id}</div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button variant="secondary" onClick={() => setExamStatus(e.id, 'active')}>
-                    진행중으로
-                  </Button>
-                  <Button
-                    variant="danger"
-                    onClick={() => {
-                      const ok = window.confirm('이 보관된 시험을 삭제할까요? 해당 시험의 과목/일정도 함께 삭제됩니다.')
-                      if (!ok) return
-                      deleteExam(e.id)
-                    }}
-                  >
-                    삭제
-                  </Button>
-                </div>
+      <TimePickerModal
+        open={timelinePickerOpen}
+        title={timelinePickerField === 'start' ? '시작' : '종료'}
+        initialHm={
+          timelinePickerField === 'start'
+            ? minutesToHm(defaultTimelineWindow.startMin)
+            : minutesToHm(Math.max(defaultTimelineWindow.startMin + 10, defaultTimelineWindow.endMin))
+        }
+        stepMinutes={10}
+        validate={(hm) => {
+          const m = hmToMinutesLocal(hm)
+          if (m === null) return '시간 형식이 올바르지 않아요.'
+          const startMin = timelinePickerField === 'start' ? snap10(m) : defaultTimelineWindow.startMin
+          const endMin = timelinePickerField === 'end' ? snap10(m) : defaultTimelineWindow.endMin
+          if (timelinePickerField === 'start') {
+            if (defaultTimelineWindow.endMin <= startMin) return '종료는 시작보다 뒤여야 해요.'
+          } else {
+            if (endMin <= defaultTimelineWindow.startMin) return '종료는 시작보다 뒤여야 해요.'
+          }
+          return null
+        }}
+        onApply={(hm) => {
+          const m = hmToMinutesLocal(hm)
+          if (m === null) return
+          if (timelinePickerField === 'start') {
+            const startMin = snap10(m)
+            const endMin = Math.max(startMin + 10, defaultTimelineWindow.endMin)
+            setDefaultTimelineWindow({ startMin, endMin })
+          } else {
+            const endMin = Math.max(defaultTimelineWindow.startMin + 10, snap10(m))
+            setDefaultTimelineWindow({ startMin: defaultTimelineWindow.startMin, endMin })
+          }
+        }}
+        onClose={() => setTimelinePickerOpen(false)}
+      />
+
+      {examEditorOpen ? (
+        <div
+          className="fixed inset-0 z-[95] flex items-center justify-center bg-slate-900/35 px-4"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setExamEditorOpen(false)
+          }}
+        >
+          <div className="w-full max-w-md rounded-2xl bg-white p-4 shadow-2xl" onMouseDown={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-base font-semibold text-slate-900">{examEditorMode === 'add' ? '시즌 등록' : '시즌 편집'}</div>
+              <button
+                type="button"
+                onClick={() => setExamEditorOpen(false)}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-xl text-slate-500 hover:bg-slate-100"
+                aria-label="닫기"
+              >
+                <span aria-hidden="true" className="text-xl leading-none">
+                  ×
+                </span>
+              </button>
+            </div>
+
+            <div className="mt-3 space-y-3">
+              <div>
+                <div className="mb-1 text-xs font-semibold text-slate-600">시즌 이름</div>
+                <Input value={examEditorName} onChange={setExamEditorName} placeholder="예: 2026-1 중간고사" />
               </div>
-            ))}
+              <div>
+                <div className="mb-1 text-xs font-semibold text-slate-600">시즌 종료일</div>
+                <input
+                  type="date"
+                  value={examEditorDate}
+                  onChange={(ev) => setExamEditorDate(ev.target.value)}
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-400"
+                />
+              </div>
+            </div>
+
+            <div className="mt-4 grid grid-cols-2 gap-3">
+              <Button
+                onClick={() => {
+                  if (examEditorMode === 'add') {
+                    const id = addExam(examEditorName)
+                    if (examEditorDate.trim()) updateExam(id, { examDate: examEditorDate.trim() || undefined })
+                    setActiveExam(id)
+                    setExamEditorOpen(false)
+                    return
+                  }
+                  if (!examEditorId) return
+                  updateExam(examEditorId, { name: examEditorName.trim() || '시즌', examDate: examEditorDate.trim() || undefined })
+                  setExamEditorOpen(false)
+                }}
+              >
+                완료
+              </Button>
+              <Button variant="secondary" onClick={() => setExamEditorOpen(false)}>
+                취소
+              </Button>
+            </div>
+            {examEditorMode === 'edit' && examEditorId ? (
+              <div className="mt-3">
+                <Button
+                  variant="danger"
+                  onClick={() => {
+                    const ok = window.confirm('이 시즌을 삭제할까요? 해당 시즌의 주제/일정도 함께 삭제됩니다.')
+                    if (!ok) return
+                    deleteExam(examEditorId)
+                    setExamEditorOpen(false)
+                  }}
+                >
+                  삭제
+                </Button>
+              </div>
+            ) : null}
           </div>
         </div>
-      </Card>
+      ) : null}
     </div>
   )
 }

@@ -1,4 +1,4 @@
-import { format } from 'date-fns'
+import { addDays, format } from 'date-fns'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ymdToDate } from '../lib/dates'
@@ -102,6 +102,24 @@ function pickOnColorText(bg: string) {
   return luminance < 0.55 ? 'text-white' : 'text-slate-900'
 }
 
+function estimateInlineTextPx(text: string, fontPx = 11) {
+  // rough heuristic for 11px UI font on mobile
+  // conservative: Korean + numerals + spacing tends to be wider than latin average
+  const avgCharPx = fontPx * 0.64
+  return Math.ceil(text.length * avgCharPx)
+}
+
+function formatDday(dueDate?: string) {
+  if (!dueDate) return ''
+  const today = new Date()
+  const d = new Date(`${dueDate}T00:00:00`)
+  if (Number.isNaN(d.getTime())) return ''
+  const diff = Math.round((d.getTime() - today.setHours(0, 0, 0, 0)) / (24 * 60 * 60 * 1000))
+  if (diff === 0) return 'D-DAY'
+  if (diff > 0) return `D-${diff}`
+  return `D+${Math.abs(diff)}`
+}
+
 type TimelineKind = 'planned' | 'actual'
 
 type TimelineItem = {
@@ -172,6 +190,13 @@ function saveTimelineWindow(date: string, win: TimelineWindow) {
   } catch {
     // ignore
   }
+}
+
+function remToPx(rem: string) {
+  const n = Number(rem.replace(/rem$/, ''))
+  if (!Number.isFinite(n)) return 0
+  const root = typeof window !== 'undefined' ? parseFloat(getComputedStyle(document.documentElement).fontSize || '16') : 16
+  return n * (Number.isFinite(root) ? root : 16)
 }
 
 export function DayDetailView() {
@@ -266,7 +291,7 @@ export function DayDetailView() {
     const items: TimelineItem[] = []
     for (const t of tasks) {
       const subject = subjects.find((s) => s.id === t.subjectId)
-      const subjectName = subject?.name ?? '과목'
+      const subjectName = subject?.name ?? '주제'
       const completed = t.status === 'completed'
 
       const actualStartMin = hmToMinutesLocal(t.actualStartTime)
@@ -332,6 +357,10 @@ export function DayDetailView() {
   }, [tasks, date])
 
   const title = date ? format(ymdToDate(date), 'yyyy년 M월 d일') : 'Day Detail'
+  const prevYmd = useMemo(() => format(addDays(ymdToDate(date), -1), 'yyyy-MM-dd'), [date])
+  const nextYmd = useMemo(() => format(addDays(ymdToDate(date), 1), 'yyyy-MM-dd'), [date])
+  const prevLabel = useMemo(() => `${format(addDays(ymdToDate(date), -1), 'd')}일`, [date])
+  const nextLabel = useMemo(() => `${format(addDays(ymdToDate(date), 1), 'd')}일`, [date])
 
   const openTimelineTimePicker = (field: 'start' | 'end') => {
     setTimelineTimePickerField(field)
@@ -339,6 +368,11 @@ export function DayDetailView() {
   }
 
   const [searchParams, setSearchParams] = useSearchParams()
+  const makeDayLink = (ymd: string) => {
+    const v = searchParams.get('view')
+    const q = v && v !== 'timeline' ? `?view=${encodeURIComponent(v)}` : ''
+    return `/day/${ymd}${q}`
+  }
   const dayViewMode: 'timeline' | 'planned' | 'completed' =
     searchParams.get('view') === 'planned' ? 'planned' : searchParams.get('view') === 'completed' ? 'completed' : 'timeline'
   const daySwipeRef = useRef<{ isDown: boolean; startX: number; startY: number; lastX: number }>({
@@ -348,8 +382,40 @@ export function DayDetailView() {
     lastX: 0,
   })
   const daySwipeLockRef = useRef<'none' | 'h' | 'v'>('none')
+  const daySwipeHostRef = useRef<HTMLDivElement | null>(null)
   const [daySwipeX, setDaySwipeX] = useState(0)
   const [dayIsSwiping, setDayIsSwiping] = useState(false)
+  const [daySwipeBlocked, setDaySwipeBlocked] = useState(false)
+  const daySwipeScrollStopRef = useRef<{ active: boolean; onTouchMove?: (e: TouchEvent) => void; onWheel?: (e: WheelEvent) => void }>({
+    active: false,
+  })
+  const startDaySwipeScrollStop = () => {
+    if (typeof window === 'undefined') return
+    if (daySwipeScrollStopRef.current.active) return
+    const onTouchMove = (e: TouchEvent) => {
+      // iOS Safari: prevent scrolling while horizontal swipe is active, even if pointer events become non-cancelable.
+      if (e.cancelable) e.preventDefault()
+    }
+    const onWheel = (e: WheelEvent) => {
+      if (e.cancelable) e.preventDefault()
+    }
+    daySwipeScrollStopRef.current.active = true
+    daySwipeScrollStopRef.current.onTouchMove = onTouchMove
+    daySwipeScrollStopRef.current.onWheel = onWheel
+    window.addEventListener('touchmove', onTouchMove, { passive: false })
+    window.addEventListener('wheel', onWheel, { passive: false })
+  }
+  const stopDaySwipeScrollStop = () => {
+    if (typeof window === 'undefined') return
+    if (!daySwipeScrollStopRef.current.active) return
+    const onTouchMove = daySwipeScrollStopRef.current.onTouchMove
+    if (onTouchMove) window.removeEventListener('touchmove', onTouchMove)
+    const onWheel = daySwipeScrollStopRef.current.onWheel
+    if (onWheel) window.removeEventListener('wheel', onWheel)
+    daySwipeScrollStopRef.current.active = false
+    daySwipeScrollStopRef.current.onTouchMove = undefined
+    daySwipeScrollStopRef.current.onWheel = undefined
+  }
   const dayTabsRef = useRef<HTMLDivElement | null>(null)
   const [dayTabsW, setDayTabsW] = useState(0)
   const timelineScrollRef = useRef<HTMLDivElement | null>(null)
@@ -387,7 +453,7 @@ export function DayDetailView() {
     for (const t of tasks) {
       const subject = subjects.find((s) => s.id === t.subjectId)
       const subjectId = subject?.id ?? 'unknown'
-      const subjectName = subject?.name ?? '과목'
+      const subjectName = subject?.name ?? '주제'
       const subjectColor = subject?.color ?? '#94a3b8'
       const key = `${subjectId}:${subjectName}:${subjectColor}`
       const g = groups.get(key) ?? { subjectId, subjectName, subjectColor, items: [] as any }
@@ -416,6 +482,7 @@ export function DayDetailView() {
 
   const timelinePanel = (
     <div className="px-4 md:px-3">
+      <div data-no-day-swipe={daySwipeBlocked ? 'true' : undefined}>
       <DayTimeline
         items={timelineItems}
         viewStartMin={timelineWindow.startMin}
@@ -423,6 +490,7 @@ export function DayDetailView() {
         onChangeWindow={(startMin, endMin) => setTimelineWindow({ startMin, endMin })}
         onRequestTimePick={(field) => openTimelineTimePicker(field)}
         onOpenTask={(taskId) => openTaskPreview(taskId)}
+        onInteractionLockChange={(locked) => setDaySwipeBlocked(locked)}
         onToggleComplete={(taskId, _kind, nextCompleted) => {
           if (nextCompleted) {
             // 타임라인 체크는 편집창의 "완료 처리"와 동일: 기록시간 없이 완료 처리
@@ -480,9 +548,13 @@ export function DayDetailView() {
         onAddRange={(startMin, endMin) => {
           const start = snap10(Math.min(startMin, endMin))
           const end = Math.max(start + 10, snap10(Math.max(startMin, endMin)))
-          openTaskAdd({ date, plannedStartTime: minutesToHm(start), plannedSeconds: (end - start) * 60 })
+          const minutes = Math.max(0, end - start)
+          // if user only uses the minimum 10-min selection, treat it as "start time only" (no duration)
+          const plannedSeconds = minutes <= 10 ? 0 : minutes * 60
+          openTaskAdd({ date, plannedStartTime: minutesToHm(start), plannedSeconds })
         }}
       />
+      </div>
     </div>
   )
 
@@ -507,7 +579,7 @@ export function DayDetailView() {
           .map((g) => (
           <div key={g.subjectId}>
             <div className="mb-2 text-sm font-semibold text-slate-900">{g.subjectName}</div>
-            <div className="space-y-2">
+            <div className="divide-y divide-slate-200 overflow-hidden rounded-xl border border-slate-200 bg-white">
               {g.items.map((t) => {
                 const hasAnyRecord = Boolean(t.actualStartTime || t.actualEndTime || typeof t.actualSeconds === 'number')
                 const isCompleted = t.status === 'completed' || hasAnyRecord
@@ -547,12 +619,13 @@ export function DayDetailView() {
                           : `${formatMeridiemHm(t.plannedStartTime) ?? t.plannedStartTime}-${formatMeridiemHm(plannedEndHm) ?? plannedEndHm}`
                         : `${formatMeridiemHm(t.plannedStartTime) ?? t.plannedStartTime}`
                       : ''
+                const dday = formatDday(t.dueDate)
                 return (
                   <button
                     key={t.id}
                     type="button"
                     onClick={() => openTaskPreview(t.id)}
-                    className={`flex w-full select-none items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm text-slate-900 ${
+                    className={`grid w-full select-none grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 px-2 py-3 text-slate-900 hover:bg-slate-50 ${
                       isCompleted ? 'opacity-75' : ''
                     }`}
                   >
@@ -599,11 +672,22 @@ export function DayDetailView() {
                         </button>
                         <span className="min-w-0 truncate font-semibold">{t.title}</span>
                       </span>
-                      <span className="pl-7 text-[11px] font-semibold tabular-nums opacity-80">
+                      <span className="pl-7 text-left text-[11px] font-semibold tabular-nums opacity-80">
                         {timeLabel ? timeLabel : <span className="invisible">오후 11:00-오후 11:40</span>}
                       </span>
                     </span>
-                    <span className="shrink-0 text-xs tabular-nums opacity-90">
+                    <span className="shrink-0 self-stretch overflow-hidden">
+                      <span
+                        className="flex max-w-[220px] flex-col items-end justify-between gap-1 overflow-hidden text-xs tabular-nums opacity-90"
+                        style={{ height: '100%' }}
+                      >
+                      <span className="min-h-[18px]">
+                        {dday ? (
+                          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-indigo-700 tabular-nums">
+                            {dday}
+                          </span>
+                        ) : null}
+                      </span>
                       {hasPlannedDuration && hasActualDuration ? (
                         <span className="mt-0.5 block text-right">
                           <span className="flex items-center justify-end gap-2">
@@ -614,7 +698,7 @@ export function DayDetailView() {
                             {deltaMin === 0 ? null : (
                               <span
                                 className={`rounded-full bg-white/70 px-1.5 py-0.5 text-[10px] font-semibold leading-none ${
-                                  deltaMin > 0 ? 'text-rose-700' : 'text-emerald-700'
+                                  deltaMin > 0 ? 'text-blue-700' : 'text-rose-700'
                                 }`}
                               >
                                 {deltaMin > 0 ? `+ ${formatDurationKoFromMinutes(deltaMin)}` : `- ${formatDurationKoFromMinutes(Math.abs(deltaMin))}`}
@@ -646,6 +730,7 @@ export function DayDetailView() {
                       ) : (
                         <span />
                       )}
+                      </span>
                     </span>
                   </button>
                 )
@@ -743,15 +828,17 @@ export function DayDetailView() {
           <MobileTopBar
             title={title}
             left={
-              <Button variant="secondary" onClick={() => navigate('/calendar')}>
-                ←
+              <Button variant="secondary" onClick={() => navigate(makeDayLink(prevYmd))}>
+                {prevLabel}
               </Button>
             }
-            right={null}
+            right={
+              <Button variant="secondary" onClick={() => navigate(makeDayLink(nextYmd))}>
+                {nextLabel}
+              </Button>
+            }
             bottom={
-              <div className="border-t border-slate-200 pt-1 xl:hidden">
-                {dayTabs}
-              </div>
+              <div className="xl:hidden">{dayTabs}</div>
             }
           />
         )
@@ -769,11 +856,12 @@ export function DayDetailView() {
       </div>
       <div
         className="xl:hidden"
+        ref={daySwipeHostRef}
         onPointerDown={(e) => {
           if (e.pointerType !== 'touch') return
           const target = e.target as HTMLElement | null
           // do not steal gestures on interactive controls
-          if (target?.closest('button, a, input, textarea, select, [role="button"]')) return
+          if (target?.closest('input, textarea, select, [data-no-day-swipe=\"true\"]')) return
           daySwipeRef.current.isDown = true
           daySwipeRef.current.startX = e.clientX
           daySwipeRef.current.startY = e.clientY
@@ -781,6 +869,8 @@ export function DayDetailView() {
           daySwipeLockRef.current = 'none'
           setDayIsSwiping(false)
           setDaySwipeX(0)
+          if (daySwipeHostRef.current) daySwipeHostRef.current.style.touchAction = 'pan-y'
+          stopDaySwipeScrollStop()
         }}
         onPointerMove={(e) => {
           if (e.pointerType !== 'touch') return
@@ -788,14 +878,28 @@ export function DayDetailView() {
           const dx = e.clientX - daySwipeRef.current.startX
           const dy = e.clientY - daySwipeRef.current.startY
           if (daySwipeLockRef.current === 'none') {
-            if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return
-            if (Math.abs(dx) > Math.abs(dy) * 1.15) daySwipeLockRef.current = 'h'
-            else if (Math.abs(dy) > Math.abs(dx) * 1.15) daySwipeLockRef.current = 'v'
+            if (Math.abs(dx) < 3 && Math.abs(dy) < 3) return
+            if (Math.abs(dx) > Math.abs(dy) * 1.08) daySwipeLockRef.current = 'h'
+            else if (Math.abs(dy) > Math.abs(dx) * 1.08) daySwipeLockRef.current = 'v'
             else return
+            if (daySwipeLockRef.current === 'h') {
+              if (daySwipeHostRef.current) daySwipeHostRef.current.style.touchAction = 'pan-x'
+              startDaySwipeScrollStop()
+              try {
+                ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+              } catch {
+                // ignore
+              }
+            } else {
+              // vertical intent: ensure horizontal swipe never steals this gesture
+              if (daySwipeHostRef.current) daySwipeHostRef.current.style.touchAction = 'pan-y'
+              stopDaySwipeScrollStop()
+            }
           }
           if (daySwipeLockRef.current === 'v') return
           if (!dayIsSwiping) setDayIsSwiping(true)
           daySwipeRef.current.lastX = e.clientX
+          // lock out vertical scroll while we are swiping horizontally (even if hand jitters vertically)
           if (e.cancelable) e.preventDefault()
           setDaySwipeX(dx)
         }}
@@ -807,6 +911,8 @@ export function DayDetailView() {
           const threshold = 62
           setDayIsSwiping(false)
           setDaySwipeX(0)
+          if (daySwipeHostRef.current) daySwipeHostRef.current.style.touchAction = 'pan-y'
+          stopDaySwipeScrollStop()
           if (daySwipeLockRef.current !== 'h') return
           if (Math.abs(dx) < threshold) return
           if (dx < 0) {
@@ -822,8 +928,10 @@ export function DayDetailView() {
           daySwipeLockRef.current = 'none'
           setDayIsSwiping(false)
           setDaySwipeX(0)
+          if (daySwipeHostRef.current) daySwipeHostRef.current.style.touchAction = 'pan-y'
+          stopDaySwipeScrollStop()
         }}
-        style={{ touchAction: dayIsSwiping ? 'none' : 'pan-y' }}
+        style={{ touchAction: 'pan-y' }}
       >
         <div className="relative overflow-hidden">
           <div
@@ -1021,7 +1129,7 @@ export function DayDetailView() {
                       for (const t of dayUnscheduled) {
                         const subject = subjects.find((s) => s.id === t.subjectId)
                         const subjectId = subject?.id ?? 'unknown'
-                        const subjectName = subject?.name ?? '과목'
+                        const subjectName = subject?.name ?? '주제'
                         const subjectColor = subject?.color ?? '#94a3b8'
                         const key = `${subjectId}:${subjectName}:${subjectColor}`
                         const g = groups.get(key) ?? { subjectId, subjectName, subjectColor, items: [] as UnscheduledTask[] }
@@ -1138,6 +1246,7 @@ function DayTimeline({
   onChangeWindow,
   onRequestTimePick,
   onOpenTask,
+  onInteractionLockChange,
 }: {
   items: TimelineItem[]
   onUpdate: (taskId: string, kind: TimelineKind, startMin: number, durationMin: number) => void
@@ -1150,8 +1259,25 @@ function DayTimeline({
   onChangeWindow: (startMin: number, endMin: number) => void
   onRequestTimePick: (field: 'start' | 'end') => void
   onOpenTask: (taskId: string) => void
+  onInteractionLockChange?: (locked: boolean) => void
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null)
+  const interactionLockedRef = useRef(false)
+  const setInteractionLocked = (next: boolean) => {
+    if (interactionLockedRef.current === next) return
+    interactionLockedRef.current = next
+    onInteractionLockChange?.(next)
+  }
+  const [containerW, setContainerW] = useState(0)
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const calc = () => setContainerW(el.getBoundingClientRect().width || 0)
+    calc()
+    const ro = new ResizeObserver(() => calc())
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
   const pendingRef = useRef<{
     pointerId: number
     id: string
@@ -1195,7 +1321,14 @@ function DayTimeline({
     endMin: number
     active: boolean
   } | null>(null)
-  const rangePressRef = useRef<{ timeoutId: number | null }>({ timeoutId: null })
+  const rangePressRef = useRef<{
+    timeoutId: number | null
+    pointerId: number
+    startX: number
+    startY: number
+    started: boolean
+    startMin: number
+  }>({ timeoutId: null, pointerId: -1, startX: 0, startY: 0, started: false, startMin: 0 })
 
   const startDragScrollStop = () => {
     if (typeof window === 'undefined') return
@@ -1307,11 +1440,14 @@ function DayTimeline({
     if (!pending) return
     if (pending.timeoutId != null) window.clearTimeout(pending.timeoutId)
     pendingRef.current = null
+    // pending drag canceled: release interaction lock if nothing else is active
+    if (!active && !rangeSelect) setInteractionLocked(false)
   }
 
   const beginDrag = (e: React.PointerEvent, id: string, kind: TimelineKind, mode: 'move' | 'resize') => {
     const it = items.find((x) => x.id === id && x.kind === kind)
     if (!it) return
+    setInteractionLocked(true)
     if (containerRef.current) containerRef.current.style.touchAction = 'none'
     startDragScrollStop()
     containerRef.current?.setPointerCapture(e.pointerId)
@@ -1336,6 +1472,8 @@ function DayTimeline({
       beginDrag(e, id, kind, mode)
       return
     }
+    // touch: lock outer horizontal swipe immediately; will be released if user scrolls instead of long-pressing
+    setInteractionLocked(true)
     cancelPending()
     const pointerId = e.pointerId
     const startX = e.clientX
@@ -1367,6 +1505,16 @@ function DayTimeline({
         return { ...cur, endMin: end <= start ? start + 10 : end }
       })
       return
+    }
+    const pendingRange = rangePressRef.current
+    if (pendingRange.pointerId === e.pointerId && pendingRange.timeoutId != null && !pendingRange.started) {
+      const dx = e.clientX - pendingRange.startX
+      const dy = e.clientY - pendingRange.startY
+      if (Math.hypot(dx, dy) > 8) {
+        if (pendingRange.timeoutId) window.clearTimeout(pendingRange.timeoutId)
+        rangePressRef.current = { timeoutId: null, pointerId: -1, startX: 0, startY: 0, started: false, startMin: 0 }
+        if (!active) setInteractionLocked(false)
+      }
     }
     const pending = pendingRef.current
     if (pending && pending.pointerId === e.pointerId && !pending.started) {
@@ -1413,7 +1561,7 @@ function DayTimeline({
     cancelPending()
     if (rangePressRef.current.timeoutId) {
       window.clearTimeout(rangePressRef.current.timeoutId)
-      rangePressRef.current.timeoutId = null
+      rangePressRef.current = { timeoutId: null, pointerId: -1, startX: 0, startY: 0, started: false, startMin: 0 }
     }
     if (e && rangeSelect && rangeSelect.pointerId === e.pointerId) {
       const cur = rangeSelect
@@ -1421,6 +1569,7 @@ function DayTimeline({
       if (containerRef.current) containerRef.current.style.touchAction = ''
       stopDragScrollStop()
       if (cur.active) onAddRange(cur.startMin, cur.endMin)
+      setInteractionLocked(false)
       return
     }
     if (active && active.mode === 'move') {
@@ -1436,6 +1585,7 @@ function DayTimeline({
     if (windowDrag && !windowDrag.moved) onRequestTimePick(windowDrag.mode)
     setWindowDrag(null)
     stopDragScrollStop()
+    setInteractionLocked(false)
   }
 
   const handleWindowPointerDown = (e: React.PointerEvent, mode: 'start' | 'end') => {
@@ -1505,18 +1655,34 @@ function DayTimeline({
           if (target?.closest('[data-timeline-item="true"]')) return
           if (target?.closest('[data-window-handle="true"]')) return
           if (!containerRef.current) return
+          if (e.pointerType === 'touch') setInteractionLocked(true)
           const rect = containerRef.current.getBoundingClientRect()
           const yInViewport = e.clientY - rect.top
           const minutesRaw = yInViewport / pxPerMin
           const at = snap10(startMin + minutesRaw)
-          setRangeSelect({ pointerId: e.pointerId, startMin: at, endMin: at + 10, active: false })
           if (rangePressRef.current.timeoutId) window.clearTimeout(rangePressRef.current.timeoutId)
-          rangePressRef.current.timeoutId = window.setTimeout(() => {
-            setRangeSelect((cur) => (cur && cur.pointerId === e.pointerId ? { ...cur, active: true } : cur))
-            // iOS: once long-press selection begins, prevent page/timeline scrolling.
-            if (containerRef.current) containerRef.current.style.touchAction = 'none'
-            startDragScrollStop()
-          }, 260)
+          rangePressRef.current = {
+            timeoutId: window.setTimeout(() => {
+              const pending = rangePressRef.current
+              if (pending.pointerId !== e.pointerId) return
+              pending.started = true
+              setRangeSelect({ pointerId: e.pointerId, startMin: pending.startMin, endMin: pending.startMin + 10, active: true })
+              if (containerRef.current) {
+                containerRef.current.style.touchAction = 'none'
+                try {
+                  containerRef.current.setPointerCapture(e.pointerId)
+                } catch {
+                  // ignore
+                }
+              }
+              startDragScrollStop()
+            }, 320),
+            pointerId: e.pointerId,
+            startX: e.clientX,
+            startY: e.clientY,
+            started: false,
+            startMin: at,
+          }
         }}
         onDragOver={(e) => e.preventDefault()}
         onDrop={handleDrop}
@@ -1644,13 +1810,22 @@ function DayTimeline({
             const gutterPx = 2
             const cols = Math.max(1, Math.floor(layout.cols))
             const col = Math.max(0, Math.min(cols - 1, Math.floor(layout.col)))
-            const preferDurationOnly =
-              durationText &&
-              (cols >= 3 ||
-                // heuristic: when 2 columns and time label is long (e.g. "오전 01:00 - 오전 03:00"), show duration only
-                (cols === 2 && timeLabel.length >= 17))
-            const showTimeRow = !preferDurationOnly
-            const showDurationOnlyRow = preferDurationOnly && durationText
+            const usableW = Math.max(0, containerW || 0)
+            const leftPx = remToPx(baseLeft)
+            const rightPx = remToPx(baseRight)
+            const innerPadPx = 16 // label container left-2/right-2
+            const columnW = cols <= 1 ? usableW - leftPx - rightPx : (usableW - leftPx - rightPx - (cols - 1) * gutterPx) / cols
+            const availableTextW = Math.max(0, columnW - innerPadPx)
+            const fullTextRaw = `${kindPill} ${timeLabel} ${durationLabel}`.trim()
+            const durationOnlyRaw = `${kindPill} ${durationText}`.trim()
+            const pillChromePx = 48 // pill padding + gap + small icon/spacing variance
+            const safetyPx = 10 // prevent "almost fits" overflow due to font/render differences
+            const fullNeededPx = pillChromePx + estimateInlineTextPx(fullTextRaw, 11) + safetyPx
+            const durNeededPx = pillChromePx + estimateInlineTextPx(durationOnlyRaw, 11) + safetyPx
+            const timeDisplayMode: 'full' | 'duration' | 'none' =
+              fullTextRaw && fullNeededPx <= availableTextW ? 'full' : durationText && durNeededPx <= availableTextW ? 'duration' : 'none'
+            const showTimeRow = timeDisplayMode === 'full'
+            const showDurationOnlyRow = timeDisplayMode === 'duration'
             const left =
               cols <= 1
                 ? `calc(${baseLeft})`

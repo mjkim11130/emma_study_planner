@@ -33,7 +33,7 @@ export function ExamDetailView() {
   if (!exam) {
     return (
       <Card>
-        <CardHeader title="Exam Detail" subtitle="존재하지 않는 시험입니다." />
+        <CardHeader title="Season Detail" subtitle="존재하지 않는 시즌입니다." />
         <div className="px-4 py-3">
           <Button variant="secondary" onClick={() => navigate('/settings')}>
             설정으로
@@ -46,12 +46,12 @@ export function ExamDetailView() {
   return (
     <div className="flex flex-col gap-3">
       <Card>
-        <CardHeader title="Exam Detail" subtitle="시험 단위로 과목/일정이 분리됩니다." />
+        <CardHeader title="Season Detail" subtitle="시즌 단위로 과목/일정이 분리됩니다." />
         <div className="grid grid-cols-1 gap-3 px-4 py-4 md:grid-cols-[1fr_180px]">
           <div className="flex flex-col gap-2">
-            <div className="text-xs font-semibold text-slate-600">시험 이름</div>
+            <div className="text-xs font-semibold text-slate-600">시즌 이름</div>
             <Input value={exam.name} onChange={(v) => updateExam(exam.id, { name: v })} />
-            <div className="mt-2 text-xs font-semibold text-slate-600">시험일</div>
+            <div className="mt-2 text-xs font-semibold text-slate-600">시즌 종료일</div>
             <input
               type="date"
               value={exam.examDate ?? ''}
@@ -71,7 +71,7 @@ export function ExamDetailView() {
           </div>
 
           <div className="flex flex-col gap-2">
-            <Button onClick={() => setActiveExam(exam.id)}>현재 시험으로 선택</Button>
+            <Button onClick={() => setActiveExam(exam.id)}>현재 시즌으로 선택</Button>
             {exam.status === 'active' ? (
               <Button variant="secondary" onClick={() => setExamStatus(exam.id, 'archived')}>
                 보관하기
@@ -84,7 +84,7 @@ export function ExamDetailView() {
             <Button
               variant="danger"
               onClick={() => {
-                const ok = window.confirm('이 시험을 삭제할까요? 해당 시험의 과목/일정도 함께 삭제됩니다.')
+                const ok = window.confirm('이 시즌을 삭제할까요? 해당 시즌의 과목/일정도 함께 삭제됩니다.')
                 if (!ok) return
                 deleteExam(exam.id)
                 navigate('/settings')

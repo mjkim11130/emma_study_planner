@@ -37,6 +37,15 @@ function addSecondsToHm(hm: string, secondsToAdd: number) {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
 }
 
+function secondsBetweenHm(startHm?: string | null, endHm?: string | null) {
+  const start = hmToMinutes(startHm ?? null)
+  const end = hmToMinutes(endHm ?? null)
+  if (start === null || end === null) return null
+  // treat equal as "no duration" (start-only), and disallow end earlier than start
+  if (end <= start) return null
+  return (end - start) * 60
+}
+
 function formatMeridiemHm(hm?: string) {
   if (!hm) return null
   const match = /^(\d{1,2}):(\d{2})$/.exec(hm)
@@ -80,7 +89,7 @@ function formatDurationGraphKo(totalSeconds: number) {
 }
 
 function buildNextTaskTitle(baseTitle: string, tasks: StudyTask[]) {
-  const base = (baseTitle || '과목').trim()
+  const base = (baseTitle || '주제').trim()
   const re = new RegExp(`^${base.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}\\s+(\\d+)$`)
   const used = new Set<number>()
   for (const t of tasks) {
@@ -123,12 +132,14 @@ function CompareRail({
   goalLabel,
   actualLabel,
   deltaLabel,
+  deltaSeconds,
   goalSeconds,
   actualSeconds,
 }: {
   goalLabel: string
   actualLabel: string
   deltaLabel: string
+  deltaSeconds: number
   goalSeconds: number
   actualSeconds: number
 }) {
@@ -151,7 +162,13 @@ function CompareRail({
         </div>
         <span className="text-right text-[15px] font-semibold tabular-nums text-slate-900">{actualLabel}</span>
       </div>
-      <div className="pt-1 text-center text-base font-semibold text-slate-700">{deltaLabel}</div>
+      <div
+        className={`pt-1 text-center text-base font-semibold tabular-nums ${
+          deltaSeconds > 0 ? 'text-blue-700' : deltaSeconds < 0 ? 'text-rose-700' : 'text-slate-600'
+        }`}
+      >
+        {deltaLabel}
+      </div>
     </div>
   )
 }
@@ -175,8 +192,12 @@ export function TaskDialog() {
 
   const [plannedSecondsDraft, setPlannedSecondsDraft] = useState(0)
   const [plannedDurationPickerOpen, setPlannedDurationPickerOpen] = useState(false)
+  const [actualSecondsDraft, setActualSecondsDraft] = useState(0)
+  const [actualDurationPickerOpen, setActualDurationPickerOpen] = useState(false)
   const [timePickerOpen, setTimePickerOpen] = useState(false)
-  const [timePickerField, setTimePickerField] = useState<'plannedStartTime' | 'actualStartTime' | 'actualEndTime'>('plannedStartTime')
+  const [timePickerField, setTimePickerField] = useState<'plannedStartTime' | 'plannedEndTime' | 'actualStartTime' | 'actualEndTime'>(
+    'plannedStartTime',
+  )
   const [editTitleDraft, setEditTitleDraft] = useState('')
   const [editTitleSample, setEditTitleSample] = useState('제목 추가')
   const editTitleOriginalRef = useRef<{ taskId: string; title: string } | null>(null)
@@ -345,6 +366,19 @@ export function TaskDialog() {
   useEffect(() => {
     if (!previewTask) return
     if (editTaskId !== previewTask.id) return
+    const byRange = secondsBetweenHm(previewTask.actualStartTime ?? null, previewTask.actualEndTime ?? null)
+    const base = typeof previewTask.actualSeconds === 'number' ? previewTask.actualSeconds : null
+    const seconds = byRange ?? base ?? 0
+    setActualSecondsDraft(Math.max(0, seconds))
+    // normalize legacy "start==end" into "start-only"
+    if (previewTask.actualStartTime && previewTask.actualEndTime && previewTask.actualStartTime === previewTask.actualEndTime) {
+      patchPreviewTask({ actualEndTime: undefined, actualSeconds: undefined })
+    }
+  }, [previewTask?.id, editTaskId])
+
+  useEffect(() => {
+    if (!previewTask) return
+    if (editTaskId !== previewTask.id) return
     const currentTitle = previewTask.title ?? ''
     editTitleOriginalRef.current = { taskId: previewTask.id, title: currentTitle }
     setEditTitleDraft(currentTitle)
@@ -377,6 +411,7 @@ export function TaskDialog() {
         goalLabel: formatDurationGraphKo(previewTask.plannedSeconds),
         actualLabel: formatDurationGraphKo(previewTask.actualSeconds),
         deltaLabel: '정확히 완료',
+        deltaSeconds: 0,
         goalSeconds: previewTask.plannedSeconds,
         actualSeconds: previewTask.actualSeconds,
       }
@@ -384,7 +419,8 @@ export function TaskDialog() {
     return {
       goalLabel: formatDurationGraphKo(previewTask.plannedSeconds),
       actualLabel: formatDurationGraphKo(previewTask.actualSeconds),
-      deltaLabel: variance < 0 ? `${formatDurationGraphKo(Math.abs(variance))} 일찍 완료` : `${formatDurationGraphKo(Math.abs(variance))} 오래 지속`,
+      deltaLabel: variance < 0 ? `- ${formatDurationGraphKo(Math.abs(variance))}` : `+ ${formatDurationGraphKo(Math.abs(variance))}`,
+      deltaSeconds: variance,
       goalSeconds: previewTask.plannedSeconds,
       actualSeconds: previewTask.actualSeconds,
     }
@@ -485,7 +521,7 @@ export function TaskDialog() {
                               selected ? 'ring-2 ring-slate-900/15 ring-offset-1 opacity-100' : 'border border-slate-200/70 opacity-45 saturate-[0.75]'
                             }`}
                             style={{ background: subject.color, color: pickReadableTextColor(subject.color) }}
-                            aria-label={`과목 ${subject.name} 선택`}
+                            aria-label={`주제 ${subject.name} 선택`}
                           >
                             {subject.name}
                           </button>
@@ -507,8 +543,16 @@ export function TaskDialog() {
                             style={isCompleted ? { background: color } : { borderColor: color, borderWidth: 2, borderStyle: 'solid' }}
                             aria-label={isCompleted ? '완료 해제' : '완료 처리'}
                             onClick={() => {
+                              const applyPatch = (patch: Partial<Omit<StudyTask, 'id' | 'createdAt'>>) => {
+                                if (isAddMode || isEditingPreview) {
+                                  patchPreviewTask(patch)
+                                  return
+                                }
+                                if (!previewTask) return
+                                updateTask(previewTask.id, patch)
+                              }
                               if (isCompleted) {
-                                patchPreviewTask({
+                                applyPatch({
                                   status: 'pending',
                                   recordCompleteOnly: false,
                                   actualStartTime: undefined,
@@ -516,7 +560,10 @@ export function TaskDialog() {
                                   actualSeconds: undefined,
                                 })
                               } else {
-                                patchPreviewTask({ status: 'completed' })
+                                const hasRecordedTime =
+                                  Boolean(previewTask.actualStartTime && previewTask.actualEndTime) ||
+                                  typeof previewTask.actualSeconds === 'number'
+                                applyPatch({ status: 'completed', recordCompleteOnly: !hasRecordedTime })
                               }
                             }}
                           >
@@ -535,7 +582,7 @@ export function TaskDialog() {
                           </button>
                         )
                       })()}
-                      <span className="truncate text-sm font-semibold text-slate-500">{previewSubject?.name ?? '과목'}</span>
+                      <span className="truncate text-sm font-semibold text-slate-500">{previewSubject?.name ?? '주제'}</span>
                     </div>
                   )}
                   <button
@@ -635,7 +682,7 @@ export function TaskDialog() {
 
                     {editValidationMessage ? <div className="text-sm font-semibold text-rose-700">{editValidationMessage}</div> : null}
 
-                    <div className="flex min-w-0 flex-nowrap items-center gap-3 text-base font-medium text-slate-700">
+                    <div className="flex min-w-0 flex-nowrap items-center gap-2 text-base font-medium text-slate-700">
                         <span className="shrink-0 whitespace-nowrap rounded-full bg-slate-100 px-3 py-1.5 text-sm font-semibold text-slate-500">계획</span>
                       <button
                         type="button"
@@ -660,7 +707,7 @@ export function TaskDialog() {
                           ×
                         </button>
                       ) : null}
-                      <span className="shrink-0 px-1.5 text-slate-400">·</span>
+                      <span className="shrink-0 px-1 text-slate-400">·</span>
                       <DurationPickerButton
                         valueSeconds={plannedSecondsDraft}
                         onChangeSeconds={(nextSeconds) => setPlannedSecondsDraft(nextSeconds)}
@@ -676,7 +723,26 @@ export function TaskDialog() {
                           if (!next) patchPreviewTask({ plannedSeconds: plannedSecondsDraft })
                         }}
                       />
-                      {plannedSecondsDraft > 0 ? (
+                      <span className="shrink-0 px-1 text-slate-400">·</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!previewTask.plannedStartTime) return
+                          setTimePickerField('plannedEndTime')
+                          setTimePickerOpen(true)
+                        }}
+                        className={`min-w-0 cursor-pointer truncate whitespace-nowrap text-left tracking-[-0.02em] underline decoration-dotted underline-offset-4 transition md:tracking-[-0.04em] ${
+                          previewTask.plannedStartTime && plannedSecondsDraft > 0
+                            ? 'text-slate-700 decoration-slate-200 hover:decoration-slate-400'
+                            : 'text-slate-400 decoration-slate-200 hover:decoration-slate-300'
+                        } ${previewTask.plannedStartTime ? '' : 'pointer-events-none'}`}
+                        aria-label="종료시간 입력"
+                      >
+                        {previewTask.plannedStartTime && plannedSecondsDraft > 0
+                          ? `${formatMeridiemHm(addSecondsToHm(previewTask.plannedStartTime, plannedSecondsDraft) ?? '') ?? addSecondsToHm(previewTask.plannedStartTime, plannedSecondsDraft)}까지`
+                          : '종료시간 입력'}
+                      </button>
+                      {previewTask.plannedStartTime && plannedSecondsDraft > 0 ? (
                         <button
                           type="button"
                           onClick={() => {
@@ -684,7 +750,7 @@ export function TaskDialog() {
                             patchPreviewTask({ plannedSeconds: 0 })
                           }}
                           className="shrink-0 cursor-pointer text-base font-semibold text-slate-400 transition hover:text-slate-600"
-                          aria-label="계획 소요시간 삭제"
+                          aria-label="계획 종료/소요시간 삭제"
                         >
                           ×
                         </button>
@@ -694,7 +760,10 @@ export function TaskDialog() {
                     <div className="flex flex-col gap-2 md:flex-row md:items-center">
                       <div className="flex min-w-0 flex-nowrap items-center gap-3 text-base font-medium text-slate-700 md:flex-1">
                         <span className="shrink-0 whitespace-nowrap rounded-full bg-slate-900 px-3 py-1.5 text-sm font-semibold text-white">완료</span>
-                        {previewTask.recordCompleteOnly && !previewTask.actualStartTime && !previewTask.actualEndTime ? (
+                        {previewTask.recordCompleteOnly &&
+                        !previewTask.actualStartTime &&
+                        !previewTask.actualEndTime &&
+                        !(typeof previewTask.actualSeconds === 'number' && previewTask.actualSeconds > 0) ? (
                           <span className="min-w-0 truncate whitespace-nowrap tracking-[-0.02em] text-slate-700 md:tracking-[-0.04em]">완료 처리</span>
                         ) : (
                           <>
@@ -711,7 +780,53 @@ export function TaskDialog() {
                             >
                               {previewTask.actualStartTime ? `${formatMeridiemHm(previewTask.actualStartTime) ?? previewTask.actualStartTime}부터` : '시작시간 입력'}
                             </button>
-                            <span className="shrink-0 px-1.5 text-slate-400">·</span>
+                            {previewTask.actualStartTime ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  patchPreviewTask({
+                                    actualStartTime: undefined,
+                                    actualEndTime: undefined,
+                                    actualSeconds: undefined,
+                                    recordCompleteOnly: false,
+                                    status: 'pending',
+                                  })
+                                  setActualSecondsDraft(0)
+                                }}
+                                className="shrink-0 cursor-pointer text-base font-semibold text-slate-400 transition hover:text-slate-600"
+                                aria-label="완료 시작시간 삭제"
+                              >
+                                ×
+                              </button>
+                            ) : null}
+                            <span className="shrink-0 px-1 text-slate-400">·</span>
+                            <DurationPickerButton
+                              valueSeconds={actualSecondsDraft}
+                              onChangeSeconds={(nextSeconds) => setActualSecondsDraft(nextSeconds)}
+                              maxHours={99}
+                              buttonLabel={actualSecondsDraft > 0 ? formatDurationPreciseKo(actualSecondsDraft) : '소요시간 입력'}
+                              buttonClassName={`min-w-0 cursor-pointer truncate whitespace-nowrap text-left text-base font-medium tracking-[-0.02em] underline decoration-dotted underline-offset-4 transition md:tracking-[-0.04em] ${
+                                actualSecondsDraft > 0 ? 'text-slate-700 decoration-slate-200 hover:decoration-slate-400' : 'text-slate-400 decoration-slate-200 hover:decoration-slate-300'
+                              }`}
+                              ariaLabel="완료 소요시간 입력"
+                              open={actualDurationPickerOpen}
+                              onOpenChange={(next) => {
+                                setActualDurationPickerOpen(next)
+                                if (next) return
+                                if (!previewTask.actualStartTime) {
+                                  patchPreviewTask({ actualSeconds: actualSecondsDraft, status: 'completed', recordCompleteOnly: false })
+                                  return
+                                }
+                                const end = actualSecondsDraft > 0 ? addSecondsToHm(previewTask.actualStartTime, actualSecondsDraft) : null
+                                patchPreviewTask({
+                                  actualSeconds: actualSecondsDraft > 0 ? actualSecondsDraft : undefined,
+                                  actualEndTime: end ?? previewTask.actualEndTime,
+                                  status: 'completed',
+                                  recordCompleteOnly: false,
+                                })
+                              }}
+                            />
+                            <span className="shrink-0 px-1 text-slate-400">·</span>
                             <button
                               type="button"
                               onClick={() => {
@@ -725,19 +840,18 @@ export function TaskDialog() {
                             >
                               {previewTask.actualEndTime ? `${formatMeridiemHm(previewTask.actualEndTime) ?? previewTask.actualEndTime}까지` : '종료시간 입력'}
                             </button>
-                            {previewTask.actualStartTime || previewTask.actualEndTime ? (
+                            {previewTask.actualEndTime || actualSecondsDraft > 0 || typeof previewTask.actualSeconds === 'number' ? (
                               <button
                                 type="button"
                                 onClick={() => {
                                   patchPreviewTask({
-                                    actualStartTime: undefined,
                                     actualEndTime: undefined,
                                     actualSeconds: undefined,
-                                    status: 'pending',
                                   })
+                                  setActualSecondsDraft(0)
                                 }}
                                 className="shrink-0 cursor-pointer text-base font-semibold text-slate-400 transition hover:text-slate-600"
-                                aria-label="완료 삭제"
+                                aria-label="완료 종료/소요시간 삭제"
                               >
                                 ×
                               </button>
@@ -760,9 +874,19 @@ export function TaskDialog() {
                             const hasRecordedTime =
                               Boolean(previewTask.actualStartTime && previewTask.actualEndTime) || typeof previewTask.actualSeconds === 'number'
                             if (checked) {
+                              if (hasRecordedTime) {
+                                patchPreviewTask({ status: 'completed', recordCompleteOnly: false })
+                                return
+                              }
+                              const plannedStart = previewTask.plannedStartTime
+                              const plannedSeconds = previewTask.plannedSeconds ?? 0
+                              const plannedEnd = plannedStart && plannedSeconds > 0 ? addSecondsToHm(plannedStart, plannedSeconds) : null
                               patchPreviewTask({
                                 status: 'completed',
-                                recordCompleteOnly: hasRecordedTime ? false : true,
+                                recordCompleteOnly: true,
+                                actualStartTime: plannedStart && plannedEnd ? plannedStart : undefined,
+                                actualEndTime: plannedStart && plannedEnd ? plannedEnd : undefined,
+                                actualSeconds: undefined,
                               })
                               return
                             }
@@ -821,6 +945,7 @@ export function TaskDialog() {
                     goalLabel={previewActualSummary.goalLabel}
                     actualLabel={previewActualSummary.actualLabel}
                     deltaLabel={previewActualSummary.deltaLabel}
+                    deltaSeconds={previewActualSummary.deltaSeconds}
                     goalSeconds={previewActualSummary.goalSeconds}
                     actualSeconds={previewActualSummary.actualSeconds}
                   />
@@ -842,17 +967,11 @@ export function TaskDialog() {
                   const addFallbackTitle = buildNextTaskTitle((previewSubject?.name ?? '').trim(), tasks)
                   const nextTitle = isAddMode ? draft || addFallbackTitle : draft || original || (previewSubject?.name ?? '').trim()
                   if (!previewTask.recordCompleteOnly) {
-                    const start = hmToMinutes(previewTask.actualStartTime ?? null)
-                    const end = hmToMinutes(previewTask.actualEndTime ?? null)
-                    const hasOnlyOne = (start === null) !== (end === null)
-                    if (hasOnlyOne) {
-                      setEditValidationMessage('완료 시작시간과 종료시간을 모두 입력해야 저장할 수 있어요.')
-                      return
-                    }
+                    // start-only completion is allowed; only validate when both exist.
                   }
                   const start = hmToMinutes(previewTask.actualStartTime ?? null)
                   const end = hmToMinutes(previewTask.actualEndTime ?? null)
-                  if (start !== null && end !== null && end < start) {
+                  if (start !== null && end !== null && end <= start) {
                     setEditValidationMessage('완료 종료시간이 시작시간보다 빨라요.')
                     return
                   }
@@ -1012,7 +1131,15 @@ export function TaskDialog() {
       {isEditingPreview && timePickerOpen ? (
         <TimePickerModal
           open
-          title={timePickerField === 'actualStartTime' ? '완료 시작시간' : timePickerField === 'actualEndTime' ? '완료 종료시간' : '계획 시작시간'}
+          title={
+            timePickerField === 'actualStartTime'
+              ? '완료 시작시간'
+              : timePickerField === 'actualEndTime'
+                ? '완료 종료시간'
+                : timePickerField === 'plannedEndTime'
+                  ? '계획 종료시간'
+                  : '계획 시작시간'
+          }
           initialHm={
             (() => {
               if (!previewTask) return null
@@ -1020,39 +1147,84 @@ export function TaskDialog() {
                 ? previewTask.actualStartTime ?? previewTask.actualEndTime ?? null
                 : timePickerField === 'actualEndTime'
                   ? previewTask.actualEndTime ?? previewTask.actualStartTime ?? null
-                  : previewTask.plannedStartTime ?? null
+                  : timePickerField === 'plannedEndTime'
+                    ? (previewTask.plannedStartTime && plannedSecondsDraft > 0
+                        ? addSecondsToHm(previewTask.plannedStartTime, plannedSecondsDraft)
+                        : null) ?? null
+                    : previewTask.plannedStartTime ?? null
             })()
           }
           onApply={(hm) => {
             if (!previewTask) return
             if (timePickerField === 'actualStartTime') {
+              const startMin = hmToMinutes(hm)
+              if (startMin === null) return
               patchPreviewTask({
                 actualStartTime: hm,
-                actualEndTime: previewTask.actualEndTime ? previewTask.actualEndTime : hm,
+                // do not auto-fill end time; start-only is allowed
+                actualSeconds: previewTask.actualEndTime ? actualSecondsDraft : undefined,
                 recordCompleteOnly: false,
                 status: 'completed',
               })
             } else if (timePickerField === 'actualEndTime') {
-              patchPreviewTask({
-                actualEndTime: hm,
-                actualStartTime: previewTask.actualStartTime ? previewTask.actualStartTime : hm,
-                recordCompleteOnly: false,
-                status: 'completed',
-              })
+              const startMin = hmToMinutes(previewTask.actualStartTime ?? null)
+              const endMin = hmToMinutes(hm)
+              if (endMin === null) return
+              if (startMin !== null) {
+                if (endMin === startMin) return
+                const nextSeconds = Math.max(0, (endMin - startMin) * 60)
+                setActualSecondsDraft(nextSeconds)
+                patchPreviewTask({
+                  actualEndTime: hm,
+                  actualSeconds: nextSeconds > 0 ? nextSeconds : undefined,
+                  recordCompleteOnly: false,
+                  status: 'completed',
+                })
+                return
+              }
+              // end without start: treat as start-only
+              patchPreviewTask({ actualStartTime: hm, actualEndTime: undefined, actualSeconds: undefined, recordCompleteOnly: false, status: 'completed' })
+            } else if (timePickerField === 'plannedEndTime') {
+              if (!previewTask.plannedStartTime) return
+              const nextSeconds = secondsBetweenHm(previewTask.plannedStartTime, hm) ?? 0
+              setPlannedSecondsDraft(nextSeconds)
+              patchPreviewTask({ plannedSeconds: nextSeconds })
             } else {
+              const end = previewTask.plannedStartTime && plannedSecondsDraft > 0 ? addSecondsToHm(previewTask.plannedStartTime, plannedSecondsDraft) : null
               patchPreviewTask({ plannedStartTime: hm })
+              if (end) {
+                const nextSeconds = secondsBetweenHm(hm, end) ?? 0
+                setPlannedSecondsDraft(nextSeconds)
+                patchPreviewTask({ plannedSeconds: nextSeconds })
+              } else if (plannedSecondsDraft > 0) {
+                // keep duration, recompute end implicitly
+                patchPreviewTask({ plannedSeconds: plannedSecondsDraft })
+              }
             }
           }}
           onClose={() => setTimePickerOpen(false)}
           validate={(hm) => {
             const proposedMin = hmToMinutes(hm)
             if (proposedMin === null) return null
-            const startMin = timePickerField === 'actualEndTime' ? hmToMinutes(previewTask?.actualStartTime ?? null) : null
-            const endMin = timePickerField === 'actualStartTime' ? hmToMinutes(previewTask?.actualEndTime ?? null) : null
-            const invalid =
-              (timePickerField === 'actualStartTime' && endMin !== null && endMin < proposedMin) ||
-              (timePickerField === 'actualEndTime' && startMin !== null && proposedMin < startMin)
-            return invalid ? '종료시간이 시작시간보다 빨라요.' : null
+            if (timePickerField === 'actualStartTime') {
+              const endMin = hmToMinutes(previewTask?.actualEndTime ?? null)
+              if (endMin !== null && endMin < proposedMin) return '종료시간이 시작시간보다 빨라요.'
+            }
+            if (timePickerField === 'actualEndTime') {
+              const startMin = hmToMinutes(previewTask?.actualStartTime ?? null)
+              if (startMin !== null && proposedMin < startMin) return '종료시간이 시작시간보다 빨라요.'
+              if (startMin !== null && proposedMin === startMin) return '종료시간을 시작시간과 동일하게 설정할 수 없어요.'
+            }
+            if (timePickerField === 'plannedEndTime') {
+              const startMin = hmToMinutes(previewTask?.plannedStartTime ?? null)
+              if (startMin !== null && proposedMin < startMin) return '종료시간이 시작시간보다 빨라요.'
+            }
+            if (timePickerField === 'plannedStartTime') {
+              const endHm = previewTask?.plannedStartTime && plannedSecondsDraft > 0 ? addSecondsToHm(previewTask.plannedStartTime, plannedSecondsDraft) : null
+              const endMin = hmToMinutes(endHm ?? null)
+              if (endMin !== null && endMin < proposedMin) return '종료시간이 시작시간보다 빨라요.'
+            }
+            return null
           }}
         />
       ) : null}
@@ -1085,7 +1257,7 @@ export function TaskDialog() {
       {previewTask && !isAddMode && timerTaskId === previewTask.id ? (
         <TaskTimerModal
           plannedSeconds={previewTask.plannedSeconds ?? 0}
-          subjectName={previewSubject?.name ?? '과목'}
+          subjectName={previewSubject?.name ?? '주제'}
           taskTitle={previewTask.title ?? ''}
           subjectColor={previewSubject?.color ?? '#94a3b8'}
           onClose={() => setTimerTaskId(null)}

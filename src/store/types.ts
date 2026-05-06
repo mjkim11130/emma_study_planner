@@ -11,6 +11,7 @@ export type Subject = {
   examId: string
   name: string
   color: string
+  archived?: boolean
   createdAt: string
 }
 
