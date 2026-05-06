@@ -741,12 +741,7 @@ function SubjectCard({
             <span className="h-5 w-[9px] shrink-0" style={{ background: subject.color }} aria-hidden="true" />
             <div className="min-w-0 truncate text-xl font-semibold text-slate-900">{subject.name}</div>
           </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <span className="sr-only">actions</span>
-          </div>
-        </div>
-
-        <div className="flex w-full min-w-0 items-center justify-end gap-x-4 gap-y-1 text-[12px] font-semibold tabular-nums text-slate-600">
+          <div className="flex shrink-0 items-center gap-x-4 gap-y-1 text-[12px] font-semibold tabular-nums text-slate-600">
             <span className="inline-flex items-center gap-2">
               <span className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-500">남은 계획</span>
               <span className="text-[15px] font-semibold text-slate-900">{plannedCount}개</span>
@@ -756,6 +751,7 @@ function SubjectCard({
               <span className="text-[15px] font-semibold text-slate-900">{completedCount}개</span>
             </span>
           </div>
+        </div>
 
         {completedCount ? (
           <div className="mt-2">
@@ -813,19 +809,19 @@ function SubjectCard({
       <div className="mt-3 flex w-full items-stretch gap-2">
         <button
           type="button"
-          onClick={onAddTask}
-          className="inline-flex h-10 flex-1 items-center justify-center rounded-xl px-4 text-sm font-semibold transition hover:opacity-90"
-          style={{ background: subject.color, color: pickReadableTextColor(subject.color) }}
-        >
-          + 일정 추가
-        </button>
-        <button
-          type="button"
           onClick={onEditSubject}
           className="inline-flex h-10 flex-1 items-center justify-center rounded-xl bg-slate-100 px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-200"
           aria-label="주제 편집"
         >
           주제 편집
+        </button>
+        <button
+          type="button"
+          onClick={onAddTask}
+          className="inline-flex h-10 flex-1 items-center justify-center rounded-xl px-4 text-sm font-semibold transition hover:opacity-90"
+          style={{ background: subject.color, color: pickReadableTextColor(subject.color) }}
+        >
+          + 일정 추가
         </button>
       </div>
     </div>
@@ -1172,7 +1168,7 @@ export function SubjectDashboardView() {
                     <div className="flex flex-col gap-2.5 py-1">
                       <div className="grid grid-cols-[40px_minmax(0,1fr)_auto] items-center gap-2">
                         <span className="text-sm font-semibold text-slate-400">계획</span>
-                        <div className="h-3.5 w-full overflow-hidden rounded-full bg-slate-200">
+                        <div className="h-3.5 w-full overflow-hidden rounded-full bg-transparent">
                           <div className="h-full overflow-hidden rounded-full" style={{ width: `${aggregate.plannedPct}%` }}>
                             <div className="flex h-full w-full overflow-hidden rounded-full">
                               {aggregate.plannedBySubject.length ? (
@@ -1188,9 +1184,7 @@ export function SubjectDashboardView() {
                                     }}
                                   />
                                 ))
-                              ) : (
-                                <div className="h-full w-full bg-slate-200" />
-                              )}
+                              ) : null}
                             </div>
                           </div>
                         </div>
@@ -1200,7 +1194,7 @@ export function SubjectDashboardView() {
                       </div>
                       <div className="grid grid-cols-[40px_minmax(0,1fr)_auto] items-center gap-2">
                         <span className="text-sm font-semibold text-slate-900">완료</span>
-                        <div className="h-3.5 w-full overflow-hidden rounded-full bg-slate-100">
+                        <div className="h-3.5 w-full overflow-hidden rounded-full bg-transparent">
                           <div className="h-full overflow-hidden rounded-full" style={{ width: `${aggregate.completedPct}%` }}>
                             <div className="flex h-full w-full overflow-hidden rounded-full">
                               {aggregate.completedBySubject.length ? (
@@ -1215,9 +1209,7 @@ export function SubjectDashboardView() {
                                     }}
                                   />
                                 ))
-                              ) : (
-                                <div className="h-full w-full bg-slate-100" />
-                              )}
+                              ) : null}
                             </div>
                           </div>
                         </div>

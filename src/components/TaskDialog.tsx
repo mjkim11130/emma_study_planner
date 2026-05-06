@@ -533,8 +533,16 @@ export function TaskDialog() {
                             style={isCompleted ? { background: color } : { borderColor: color, borderWidth: 2, borderStyle: 'solid' }}
                             aria-label={isCompleted ? '완료 해제' : '완료 처리'}
                             onClick={() => {
+                              const applyPatch = (patch: Partial<Omit<StudyTask, 'id' | 'createdAt'>>) => {
+                                if (isAddMode || isEditingPreview) {
+                                  patchPreviewTask(patch)
+                                  return
+                                }
+                                if (!previewTask) return
+                                updateTask(previewTask.id, patch)
+                              }
                               if (isCompleted) {
-                                patchPreviewTask({
+                                applyPatch({
                                   status: 'pending',
                                   recordCompleteOnly: false,
                                   actualStartTime: undefined,
@@ -545,7 +553,7 @@ export function TaskDialog() {
                                 const hasRecordedTime =
                                   Boolean(previewTask.actualStartTime && previewTask.actualEndTime) ||
                                   typeof previewTask.actualSeconds === 'number'
-                                patchPreviewTask({ status: 'completed', recordCompleteOnly: !hasRecordedTime })
+                                applyPatch({ status: 'completed', recordCompleteOnly: !hasRecordedTime })
                               }
                             }}
                           >

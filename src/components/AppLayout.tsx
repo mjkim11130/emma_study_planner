@@ -83,16 +83,6 @@ export function AppLayout() {
   const [taskDialogRequest, setTaskDialogRequest] = useState<null | { mode: 'add'; date?: string; subjectId?: string } | { mode: 'preview'; taskId: string; autoEdit?: boolean; autoCloseAfterComplete?: boolean }>(null)
   const [subjectDialogOpen, setSubjectDialogOpen] = useState(false)
   const [pendingTaskCreate, setPendingTaskCreate] = useState<null | { date?: string }>(null)
-  const [sidebarPanelsOpen, setSidebarPanelsOpen] = useState(() => {
-    try {
-      const raw = window.localStorage.getItem('emma-study-planner:sidebarPanelsOpen:v1')
-      if (!raw) return { calendar: true, day: true }
-      const parsed = JSON.parse(raw) as { calendar?: boolean; day?: boolean }
-      return { calendar: parsed.calendar ?? true, day: parsed.day ?? true }
-    } catch {
-      return { calendar: true, day: true }
-    }
-  })
   const [sidebarSubjectGroupsOpen, setSidebarSubjectGroupsOpen] = useState(() => {
     try {
       const raw = window.localStorage.getItem('emma-study-planner:sidebarSubjectGroupsOpen:v1')
@@ -103,13 +93,6 @@ export function AppLayout() {
       return { calendar: {} as Record<string, boolean>, day: {} as Record<string, boolean> }
     }
   })
-  useEffect(() => {
-    try {
-      window.localStorage.setItem('emma-study-planner:sidebarPanelsOpen:v1', JSON.stringify(sidebarPanelsOpen))
-    } catch {
-      // ignore
-    }
-  }, [sidebarPanelsOpen])
   useEffect(() => {
     try {
       window.localStorage.setItem('emma-study-planner:sidebarSubjectGroupsOpen:v1', JSON.stringify(sidebarSubjectGroupsOpen))
@@ -242,101 +225,85 @@ export function AppLayout() {
                     ) : null}
                   </div>
                   <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={() => setSidebarPanelsOpen((p) => ({ ...p, calendar: !p.calendar }))}
-                      className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200"
-                      aria-label={sidebarPanelsOpen.calendar ? '접기' : '펼치기'}
-                    >
-                      <svg
-                        viewBox="0 0 20 20"
-                        className={`h-4 w-4 transition-transform ${sidebarPanelsOpen.calendar ? '' : 'rotate-180'}`}
-                        aria-hidden="true"
-                      >
-                        <path d="M5.5 7.5L10 12l4.5-4.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
-                    </button>
                     <Button onClick={createTaskAndOpen}>+ 일정 추가</Button>
                   </div>
                 </div>
-                {sidebarPanelsOpen.calendar ? (
-                  <div
-                    className="min-h-0 flex-1 border-t border-slate-100 p-2"
-                    onDragOver={(e) => {
-                      e.preventDefault()
-                    }}
-                    onDrop={(e) => {
-                      e.preventDefault()
-                      const taskId = e.dataTransfer.getData('text/emma-task-id')
-                      if (taskId) updateTask(taskId, { date: '' })
-                    }}
-                  >
-                    <div className="h-full min-h-0 overflow-y-auto overscroll-contain pr-1">
-                      <div className="space-y-2">
-                        {unassignedBySubject.map((g) => {
-                          const subject = subjects.find((s) => s.id === g.subjectId)
-                          const isOpen = sidebarSubjectGroupsOpen.calendar[g.subjectId] ?? true
-                          return (
-                            <div key={g.subjectId}>
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setSidebarSubjectGroupsOpen((prev) => ({
-                                    ...prev,
-                                    calendar: { ...prev.calendar, [g.subjectId]: !(prev.calendar[g.subjectId] ?? true) },
-                                  }))
-                                }
-                                className="mb-1 flex w-full items-center justify-between gap-2 rounded-lg px-1 py-1 text-left text-[12px] font-semibold text-slate-700 hover:bg-slate-50"
-                                aria-label={isOpen ? '주제 접기' : '주제 펼치기'}
-                              >
-                                <span className="min-w-0 overflow-hidden whitespace-nowrap">{truncateText(subject?.name ?? '주제', 18)}</span>
-                                <span className="shrink-0 text-[11px] font-semibold text-slate-500 tabular-nums">{g.list.length}</span>
-                              </button>
-                              {isOpen ? (
-                                <div className="grid grid-cols-1 gap-2">
-                                  {g.list.map((t) => {
-                                    const sub = subjects.find((s) => s.id === t.subjectId)
-                                    const bg = sub?.color ?? '#94a3b8'
-                                    const textColor = pickReadableTextColor(bg)
-                                    const dday = formatDday(t.dueDate)
-                                    const hasActual = typeof t.actualSeconds === 'number' && Number.isFinite(t.actualSeconds)
-                                    const secondsToShow = hasActual ? (t.actualSeconds as number) : t.plannedSeconds
-                                    const timeLabelKo = formatDurationKoFromSeconds(secondsToShow)
-                                    return (
-                                      <button
-                                        key={t.id}
-                                        type="button"
-                                        onClick={() => openTaskPreview(t.id)}
-                                        draggable
-                                        onDragStart={(e) => {
-                                          e.dataTransfer.setData('text/emma-task-id', t.id)
-                                          e.dataTransfer.effectAllowed = 'move'
-                                        }}
-                                        className="block min-w-0 select-none rounded-lg px-3 py-2 text-left text-[12px] leading-tight"
-                                        style={{ background: bg, color: textColor }}
-                                      >
-                                        <div className="flex items-center justify-between gap-2">
-                                          <span className="min-w-0 overflow-hidden whitespace-nowrap">{truncateText(t.title, 16)}</span>
-                                          <span className="shrink-0 text-[11px] tabular-nums opacity-90">
-                                            <span className="rounded-md bg-white/70 px-1.5 py-0.5 text-slate-700">{timeLabelKo}</span>
-                                            {dday ? (
-                                              <span className="ml-1 rounded-md bg-white/70 px-1.5 py-0.5 font-semibold text-indigo-700">{dday}</span>
-                                            ) : null}
-                                          </span>
-                                        </div>
-                                      </button>
-                                    )
-                                  })}
-                                </div>
-                              ) : null}
-                            </div>
-                          )
-                        })}
-                        {!unassignedBySubject.length ? <div className="px-1 py-2 text-xs text-slate-400">비어있음</div> : null}
-                      </div>
+                <div
+                  className="min-h-0 flex-1 border-t border-slate-100 p-2"
+                  onDragOver={(e) => {
+                    e.preventDefault()
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault()
+                    const taskId = e.dataTransfer.getData('text/emma-task-id')
+                    if (taskId) updateTask(taskId, { date: '' })
+                  }}
+                >
+                  <div className="h-full min-h-0 overflow-y-auto overscroll-contain pr-1">
+                    <div className="space-y-2">
+                      {unassignedBySubject.map((g) => {
+                        const subject = subjects.find((s) => s.id === g.subjectId)
+                        const isOpen = sidebarSubjectGroupsOpen.calendar[g.subjectId] ?? true
+                        return (
+                          <div key={g.subjectId}>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setSidebarSubjectGroupsOpen((prev) => ({
+                                  ...prev,
+                                  calendar: { ...prev.calendar, [g.subjectId]: !(prev.calendar[g.subjectId] ?? true) },
+                                }))
+                              }
+                              className="mb-1 flex w-full items-center justify-between gap-2 rounded-lg px-1 py-1 text-left text-[12px] font-semibold text-slate-700 hover:bg-slate-50"
+                              aria-label={isOpen ? '주제 접기' : '주제 펼치기'}
+                            >
+                              <span className="min-w-0 overflow-hidden whitespace-nowrap">{truncateText(subject?.name ?? '주제', 18)}</span>
+                              <span className="shrink-0 text-[11px] font-semibold text-slate-500 tabular-nums">{g.list.length}</span>
+                            </button>
+                            {isOpen ? (
+                              <div className="grid grid-cols-1 gap-2">
+                                {g.list.map((t) => {
+                                  const sub = subjects.find((s) => s.id === t.subjectId)
+                                  const bg = sub?.color ?? '#94a3b8'
+                                  const textColor = pickReadableTextColor(bg)
+                                  const dday = formatDday(t.dueDate)
+                                  const hasActual = typeof t.actualSeconds === 'number' && Number.isFinite(t.actualSeconds)
+                                  const secondsToShow = hasActual ? (t.actualSeconds as number) : t.plannedSeconds
+                                  const timeLabelKo = formatDurationKoFromSeconds(secondsToShow)
+                                  return (
+                                    <button
+                                      key={t.id}
+                                      type="button"
+                                      onClick={() => openTaskPreview(t.id)}
+                                      draggable
+                                      onDragStart={(e) => {
+                                        e.dataTransfer.setData('text/emma-task-id', t.id)
+                                        e.dataTransfer.effectAllowed = 'move'
+                                      }}
+                                      className="block min-w-0 select-none rounded-lg px-3 py-2 text-left text-[12px] leading-tight"
+                                      style={{ background: bg, color: textColor }}
+                                    >
+                                      <div className="flex items-center justify-between gap-2">
+                                        <span className="min-w-0 overflow-hidden whitespace-nowrap">{truncateText(t.title, 16)}</span>
+                                        <span className="shrink-0 text-[11px] tabular-nums opacity-90">
+                                          <span className="rounded-md bg-white/70 px-1.5 py-0.5 text-slate-700">{timeLabelKo}</span>
+                                          {dday ? (
+                                            <span className="ml-1 rounded-md bg-white/70 px-1.5 py-0.5 font-semibold text-indigo-700">{dday}</span>
+                                          ) : null}
+                                        </span>
+                                      </div>
+                                    </button>
+                                  )
+                                })}
+                              </div>
+                            ) : null}
+                          </div>
+                        )
+                      })}
+                      {!unassignedBySubject.length ? <div className="px-1 py-2 text-xs text-slate-400">비어있음</div> : null}
                     </div>
                   </div>
-                ) : null}
+                </div>
               </div>
             ) : null}
 
@@ -352,37 +319,22 @@ export function AppLayout() {
                     ) : null}
                   </div>
                   <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={() => setSidebarPanelsOpen((p) => ({ ...p, day: !p.day }))}
-                      className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200"
-                      aria-label={sidebarPanelsOpen.day ? '접기' : '펼치기'}
-                    >
-                      <svg
-                        viewBox="0 0 20 20"
-                        className={`h-4 w-4 transition-transform ${sidebarPanelsOpen.day ? '' : 'rotate-180'}`}
-                        aria-hidden="true"
-                      >
-                        <path d="M5.5 7.5L10 12l4.5-4.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
-                    </button>
                     <Button onClick={() => createTaskAndOpenForDay(dayPageDate)}>+ 일정 추가</Button>
                   </div>
                 </div>
-                {sidebarPanelsOpen.day ? (
-                  <div
-                    className="min-h-0 flex-1 border-t border-slate-100 p-2"
-                    data-unscheduled-dropzone="true"
-                    onDragOver={(e) => e.preventDefault()}
-                    onDrop={(e) => {
-                      e.preventDefault()
-                      const taskId = e.dataTransfer.getData('text/emma-task-id')
-                      if (taskId) updateTask(taskId, { plannedStartTime: undefined })
-                    }}
-                  >
-                    <div className="h-full min-h-0 overflow-y-auto overscroll-contain pr-1">
-                      <div className="space-y-2">
-                      {(() => {
+                <div
+                  className="min-h-0 flex-1 border-t border-slate-100 p-2"
+                  data-unscheduled-dropzone="true"
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => {
+                    e.preventDefault()
+                    const taskId = e.dataTransfer.getData('text/emma-task-id')
+                    if (taskId) updateTask(taskId, { plannedStartTime: undefined })
+                  }}
+                >
+                  <div className="h-full min-h-0 overflow-y-auto overscroll-contain pr-1">
+                    <div className="space-y-2">
+                    {(() => {
                         type DayUnscheduledTask = (typeof dayUnscheduled)[number]
                         const bySubject = new Map<
                           string,
@@ -499,7 +451,6 @@ export function AppLayout() {
                     </div>
                   </div>
                 </div>
-                ) : null}
               </div>
             ) : null}
             </aside>

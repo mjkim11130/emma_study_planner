@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Button, Card, CardHeader, Input, Select } from '../components/ui'
+import { Button, Card, CardHeader, Input } from '../components/ui'
 import { usePlannerStore } from '../store/usePlannerStore'
 import { useAuth } from '../auth/AuthContext'
 import { getSupabase, supabaseConfigOk } from '../lib/supabaseClient'
@@ -63,7 +63,6 @@ export function SettingsView() {
   const { user } = useAuth()
   const exams = usePlannerStore((s) => s.exams)
   const activeExamId = usePlannerStore((s) => s.activeExamId)
-  const activeExam = usePlannerStore(useMemo(() => (s) => s.exams.find((e) => e.id === activeExamId), [activeExamId]))
   const setActiveExam = usePlannerStore((s) => s.setActiveExam)
   const addExam = usePlannerStore((s) => s.addExam)
   const updateExam = usePlannerStore((s) => s.updateExam)
@@ -165,30 +164,6 @@ export function SettingsView() {
             >
               이 계정 데이터 초기화
             </Button>
-          </div>
-        </div>
-      </Card>
-
-      <Card>
-        <CardHeader title="시험" />
-        <div className="grid grid-cols-1 gap-2 px-4 py-3 md:grid-cols-2">
-          <div>
-            <div className="mb-1 text-xs font-semibold text-slate-600">현재 시험</div>
-            <Select value={activeExamId} onChange={setActiveExam}>
-              {activeExams.map((e) => (
-                <option key={e.id} value={e.id}>
-                  {e.name}
-                </option>
-              ))}
-            </Select>
-          </div>
-          <div>
-            <div className="mb-1 text-xs font-semibold text-slate-600">시험 명 수정</div>
-            <Input
-              value={activeExam?.name ?? ''}
-              onChange={(v) => updateExam(activeExamId, { name: v })}
-              placeholder="시험 이름"
-            />
           </div>
         </div>
       </Card>

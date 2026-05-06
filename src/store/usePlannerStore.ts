@@ -18,7 +18,7 @@ type PlannerState = {
   tasks: StudyTask[]
   lastUsedSubjectIdByExam: Record<string, string>
   addSubject: (input: { name: string; color: string; examId?: string }) => void
-  updateSubject: (id: string, patch: Partial<Pick<Subject, 'name' | 'color' | 'examId'>>) => void
+  updateSubject: (id: string, patch: Partial<Pick<Subject, 'name' | 'color' | 'examId' | 'archived'>>) => void
   deleteSubject: (id: string) => void
   addTask: (input: {
     subjectId: string
@@ -141,6 +141,7 @@ export const usePlannerStore = create<PlannerState>()(
                 examId: resolvedExamId,
                 name: name.trim() || '새 과목',
                 color,
+                archived: false,
                 createdAt: nowIso(),
               },
             ],

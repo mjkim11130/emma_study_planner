@@ -1,7 +1,7 @@
 import { addDays, format } from 'date-fns'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { todayYmd, ymdToDate } from '../lib/dates'
+import { ymdToDate } from '../lib/dates'
 import { formatDurationKoFromMinutes, formatDurationKoFromSeconds } from '../lib/time'
 import { Button } from '../components/ui'
 import { usePlannerStore } from '../store/usePlannerStore'
@@ -672,7 +672,7 @@ export function DayDetailView() {
                         </button>
                         <span className="min-w-0 truncate font-semibold">{t.title}</span>
                       </span>
-                      <span className="pl-7 text-[11px] font-semibold tabular-nums opacity-80">
+                      <span className="pl-7 text-left text-[11px] font-semibold tabular-nums opacity-80">
                         {timeLabel ? timeLabel : <span className="invisible">오후 11:00-오후 11:40</span>}
                       </span>
                     </span>
@@ -837,7 +837,6 @@ export function DayDetailView() {
                 {nextLabel}
               </Button>
             }
-            onCenterClick={() => navigate(makeDayLink(todayYmd()))}
             bottom={
               <div className="xl:hidden">{dayTabs}</div>
             }
