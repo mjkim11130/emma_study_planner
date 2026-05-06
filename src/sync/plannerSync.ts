@@ -13,6 +13,7 @@ type PlannerData = {
   activeExamId: unknown
   subjects: unknown
   tasks: unknown
+  subjectOrderByExam?: unknown
 }
 
 function nowIso() {
@@ -28,11 +29,13 @@ function pickPlannerData(input: unknown) {
   const data = input as PlannerData
   if (!Array.isArray(data.exams) || !Array.isArray(data.subjects) || !Array.isArray(data.tasks)) return null
   if (typeof data.activeExamId !== 'string') return null
+  const subjectOrderByExam = isObject(data.subjectOrderByExam) ? data.subjectOrderByExam : undefined
   return {
     exams: data.exams,
     activeExamId: data.activeExamId,
     subjects: data.subjects,
     tasks: data.tasks,
+    ...(subjectOrderByExam ? { subjectOrderByExam } : {}),
   }
 }
 
@@ -73,6 +76,7 @@ export async function startPlannerSync(user: User): Promise<SyncHandle> {
       activeExamId: state.activeExamId,
       subjects: state.subjects,
       tasks: state.tasks,
+      subjectOrderByExam: state.subjectOrderByExam,
     }
     const payload = {
       user_id: user.id,

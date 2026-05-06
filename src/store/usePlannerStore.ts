@@ -17,9 +17,11 @@ type PlannerState = {
   subjects: Subject[]
   tasks: StudyTask[]
   lastUsedSubjectIdByExam: Record<string, string>
+  subjectOrderByExam: Record<string, string[]>
   addSubject: (input: { name: string; color: string; examId?: string }) => void
   updateSubject: (id: string, patch: Partial<Pick<Subject, 'name' | 'color' | 'examId' | 'archived'>>) => void
   deleteSubject: (id: string) => void
+  setSubjectOrder: (examId: string, subjectIds: string[]) => void
   addTask: (input: {
     subjectId: string
     title: string
@@ -104,6 +106,7 @@ const seed = () => {
     subjects,
     tasks: [] as StudyTask[],
     lastUsedSubjectIdByExam: {} as Record<string, string>,
+    subjectOrderByExam: { [exam1Id]: subjects.map((s) => s.id) } as Record<string, string[]>,
   }
 }
 
@@ -118,10 +121,12 @@ export const usePlannerStore = create<PlannerState>()(
         const createdAt = nowIso()
         set((state) => {
           const nextName = name.trim() || nextSeasonName(state.exams.map((e) => e.name), '새 시즌')
-          const nextSubjects = [...state.subjects, ...defaultSubjectsForExam(id, createdAt)]
+          const defaults = defaultSubjectsForExam(id, createdAt)
+          const nextSubjects = [...state.subjects, ...defaults]
           return {
             exams: [...state.exams, { id, name: nextName, status: 'active', createdAt }],
             subjects: nextSubjects,
+            subjectOrderByExam: { ...state.subjectOrderByExam, [id]: defaults.map((s) => s.id) },
           }
         })
         return id
@@ -145,28 +150,35 @@ export const usePlannerStore = create<PlannerState>()(
           const nextSubjects = state.subjects.filter((s) => s.examId !== examId)
           const nextSubjectIds = new Set(nextSubjects.map((s) => s.id))
           const nextTasks = state.tasks.filter((t) => t.examId !== examId && nextSubjectIds.has(t.subjectId))
+          const { [examId]: _removed, ...restOrder } = state.subjectOrderByExam
 
           let nextActiveExamId = state.activeExamId
           if (state.activeExamId === examId) {
             nextActiveExamId = nextExams.find((e) => e.status === 'active')?.id ?? nextExams[0]?.id ?? ''
           }
-          return { exams: nextExams, subjects: nextSubjects, tasks: nextTasks, activeExamId: nextActiveExamId }
+          return { exams: nextExams, subjects: nextSubjects, tasks: nextTasks, activeExamId: nextActiveExamId, subjectOrderByExam: restOrder }
         }),
       addSubject: ({ name, color, examId }) =>
         set((state) => {
           const resolvedExamId = examId ?? state.activeExamId
+          const id = randomId('sub')
+          const createdAt = nowIso()
           return {
             subjects: [
               ...state.subjects,
               {
-                id: randomId('sub'),
+                id,
                 examId: resolvedExamId,
                 name: name.trim() || '새 과목',
                 color,
                 archived: false,
-                createdAt: nowIso(),
+                createdAt,
               },
             ],
+            subjectOrderByExam: {
+              ...state.subjectOrderByExam,
+              [resolvedExamId]: [...(state.subjectOrderByExam[resolvedExamId] ?? []), id],
+            },
           }
         }),
       updateSubject: (id, patch) =>
@@ -177,7 +189,24 @@ export const usePlannerStore = create<PlannerState>()(
         set((state) => ({
           subjects: state.subjects.filter((s) => s.id !== id),
           tasks: state.tasks.filter((t) => t.subjectId !== id),
+          subjectOrderByExam: Object.fromEntries(
+            Object.entries(state.subjectOrderByExam).map(([examId, order]) => [examId, (order ?? []).filter((x) => x !== id)]),
+          ),
         })),
+      setSubjectOrder: (examId, subjectIds) =>
+        set((state) => {
+          const scopedIds = new Set(state.subjects.filter((s) => s.examId === examId).map((s) => s.id))
+          const dedup: string[] = []
+          const seen = new Set<string>()
+          for (const id of subjectIds) {
+            if (!scopedIds.has(id)) continue
+            if (seen.has(id)) continue
+            seen.add(id)
+            dedup.push(id)
+          }
+          for (const id of scopedIds) if (!seen.has(id)) dedup.push(id)
+          return { subjectOrderByExam: { ...state.subjectOrderByExam, [examId]: dedup } }
+        }),
       addTask: ({
         subjectId,
         title,
@@ -291,10 +320,23 @@ export const usePlannerStore = create<PlannerState>()(
     }),
     {
       name: 'emma-study-planner:v1',
-      version: 8,
+      version: 9,
       migrate: (persisted: any, fromVersion) => {
         if (!persisted || typeof persisted !== 'object') return seed()
-        if (fromVersion >= 8) return persisted
+        if (fromVersion >= 9) return persisted
+
+        if (fromVersion === 8) {
+          const base = persisted as any
+          const exams = Array.isArray(base.exams) ? base.exams : seed().exams
+          const subjects = Array.isArray(base.subjects) ? base.subjects : seed().subjects
+          const order: Record<string, string[]> = {}
+          for (const e of exams) {
+            const examId = String((e as any).id ?? '')
+            if (!examId) continue
+            order[examId] = subjects.filter((s: any) => String(s.examId ?? '') === examId).map((s: any) => String(s.id))
+          }
+          return { ...base, subjectOrderByExam: order }
+        }
 
         if (fromVersion === 7) {
           const tasks = Array.isArray(persisted.tasks)
@@ -429,7 +471,11 @@ export const usePlannerStore = create<PlannerState>()(
             }))
           : []
 
-        return { exams, activeExamId, subjects, tasks }
+        const subjectOrderByExam: Record<string, string[]> = {}
+        for (const e of exams) {
+          subjectOrderByExam[e.id] = subjects.filter((s) => s.examId === e.id).map((s) => s.id)
+        }
+        return { exams, activeExamId, subjects, tasks, subjectOrderByExam }
       },
     },
   ),

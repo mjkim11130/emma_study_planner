@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { MobileTopBar } from '../components/MobileTopBar'
 import { useTaskDialog } from '../components/TaskDialogContext'
 import { SubjectDialog } from '../components/SubjectDialog'
+import { TaskDialogShell } from '../components/TaskDialogShell'
 import { Button } from '../components/ui'
 import { todayYmd } from '../lib/dates'
 import { formatDurationKoFromMinutes, formatDurationKoFromSeconds } from '../lib/time'
@@ -820,9 +821,25 @@ export function SubjectDashboardView() {
   const activeExamId = usePlannerStore((s) => s.activeExamId)
   const tasks = usePlannerStore((s) => s.tasks)
   const lastUsedSubjectIdByExam = usePlannerStore((s) => s.lastUsedSubjectIdByExam)
+  const subjectOrderByExam = usePlannerStore((s) => s.subjectOrderByExam)
+  const setSubjectOrder = usePlannerStore((s) => s.setSubjectOrder)
   const { openTaskAdd, openTaskPreview } = useTaskDialog()
 
   const scopedSubjects = useMemo(() => subjects.filter((s) => s.examId === activeExamId), [subjects, activeExamId])
+  const subjectOrder = useMemo(() => subjectOrderByExam[activeExamId] ?? [], [subjectOrderByExam, activeExamId])
+  const scopedSubjectsOrdered = useMemo(() => {
+    const byId = new Map(scopedSubjects.map((s) => [s.id, s] as const))
+    const out: Subject[] = []
+    const seen = new Set<string>()
+    for (const id of subjectOrder) {
+      const s = byId.get(id)
+      if (!s) continue
+      out.push(s)
+      seen.add(id)
+    }
+    for (const s of scopedSubjects) if (!seen.has(s.id)) out.push(s)
+    return out
+  }, [scopedSubjects, subjectOrder])
 
   const createTask = (input?: { subjectId?: string; date?: string }) => {
     const fallbackSubjectId =
@@ -1010,24 +1027,31 @@ export function SubjectDashboardView() {
       keep.push(seg)
     }
     return keep
-  }, [aggregate, scopedSubjects])
+  }, [aggregate, scopedSubjectsOrdered])
 
   const visibleSubjects = useMemo(() => {
     const wantArchived = period === 'archive'
-    const scoped = scopedSubjects.filter((s) => (wantArchived ? Boolean(s.archived) : !s.archived))
+    const scoped = scopedSubjectsOrdered.filter((s) => (wantArchived ? Boolean(s.archived) : !s.archived))
     if (!queryNorm) return scoped
     return scoped.filter((s) => {
       const nameHit = s.name.toLowerCase().includes(queryNorm)
       const taskHit = matchedTaskIdsBySubject.has(s.id)
       return nameHit || taskHit
     })
-  }, [scopedSubjects, period, queryNorm, matchedTaskIdsBySubject])
+  }, [scopedSubjectsOrdered, period, queryNorm, matchedTaskIdsBySubject])
 
   const pageTitle = '주제별'
 
   const [subjectDialogOpen, setSubjectDialogOpen] = useState(false)
   const [subjectDialogMode, setSubjectDialogMode] = useState<'add' | 'edit'>('edit')
   const [subjectDialogSubjectId, setSubjectDialogSubjectId] = useState<string | null>(null)
+  const [reorderOpen, setReorderOpen] = useState(false)
+  const [reorderDraft, setReorderDraft] = useState<string[]>([])
+
+  useEffect(() => {
+    if (!reorderOpen) return
+    setReorderDraft(scopedSubjectsOrdered.map((s) => s.id))
+  }, [reorderOpen, scopedSubjectsOrdered])
 
   return (
     <div className="flex h-[calc(100dvh-72px-env(safe-area-inset-bottom))] flex-col overflow-hidden">
@@ -1203,44 +1227,42 @@ export function SubjectDashboardView() {
                       </div>
                       <div className="grid grid-cols-[40px_minmax(0,1fr)_auto] items-center gap-2">
                         <span className="text-sm font-semibold text-slate-900">완료</span>
-                        <div className="flex min-w-0 flex-col">
-                          <div className="h-1.5 w-full overflow-hidden rounded-full bg-transparent">
-                            <div className="h-full overflow-hidden rounded-full" style={{ width: `${aggregate.completedPct}%` }}>
-                              <div className="flex h-full w-full overflow-hidden rounded-full">
-                                {aggregate.completedBySubject.length ? (
-                                  aggregate.completedBySubject.map((seg) => (
-                                    <div
-                                      key={seg.subjectId}
-                                      className="h-full"
-                                      style={{
-                                        background: seg.color,
-                                        width: `${(seg.seconds / Math.max(aggregate.completedSecondsCompletedOnly, 1)) * 100}%`,
-                                        minWidth: seg.seconds > 0 ? 1 : undefined,
-                                      }}
-                                    />
-                                  ))
-                                ) : null}
-                              </div>
+                        <div className="h-1.5 w-full overflow-hidden rounded-full bg-transparent">
+                          <div className="h-full overflow-hidden rounded-full" style={{ width: `${aggregate.completedPct}%` }}>
+                            <div className="flex h-full w-full overflow-hidden rounded-full">
+                              {aggregate.completedBySubject.length ? (
+                                aggregate.completedBySubject.map((seg) => (
+                                  <div
+                                    key={seg.subjectId}
+                                    className="h-full"
+                                    style={{
+                                      background: seg.color,
+                                      width: `${(seg.seconds / Math.max(aggregate.completedSecondsCompletedOnly, 1)) * 100}%`,
+                                      minWidth: seg.seconds > 0 ? 1 : undefined,
+                                    }}
+                                  />
+                                ))
+                              ) : null}
                             </div>
                           </div>
-                          {completedLegend.length ? (
-                            <div className="mt-2 flex min-w-0 flex-wrap items-center gap-1.5">
-                              {completedLegend.map((seg) => (
-                                <span
-                                  key={seg.subjectId}
-                                  className="inline-flex items-center gap-1 rounded-full bg-slate-50 px-2 py-0.5 text-[10px] font-semibold text-slate-700 ring-1 ring-slate-200"
-                                >
-                                  <span className="h-1.5 w-1.5 rounded-full" style={{ background: seg.color }} aria-hidden="true" />
-                                  {seg.name}
-                                </span>
-                              ))}
-                            </div>
-                          ) : null}
                         </div>
                         <span className="ml-2 text-right text-[15px] font-semibold tabular-nums text-slate-900">
                           {formatDurationKo(aggregate.completedSecondsCompletedOnly)}
                         </span>
                       </div>
+                      {completedLegend.length ? (
+                        <div className="mt-3 flex min-w-0 flex-wrap items-center gap-1.5 pl-[40px]">
+                          {completedLegend.map((seg) => (
+                            <span
+                              key={seg.subjectId}
+                              className="inline-flex items-center gap-1 rounded-full bg-slate-50 px-2 py-0.5 text-[10px] font-semibold text-slate-700 ring-1 ring-slate-200"
+                            >
+                              <span className="h-1.5 w-1.5 rounded-full" style={{ background: seg.color }} aria-hidden="true" />
+                              {seg.name}
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
                       {aggregate.varianceLabel ? (
                         <div
                           className={`pt-0.5 text-center text-[13px] font-semibold tabular-nums ${
@@ -1259,7 +1281,15 @@ export function SubjectDashboardView() {
         )}
 
         {period === 'archive' ? null : (
-          <div className="flex justify-end">
+          <div className="flex items-center justify-end gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setReorderOpen(true)
+              }}
+            >
+              순서 변경
+            </Button>
             <Button
               variant="secondary"
               onClick={() => {
@@ -1312,6 +1342,102 @@ export function SubjectDashboardView() {
         subjectId={subjectDialogSubjectId}
         onClose={() => setSubjectDialogOpen(false)}
       />
+
+      <TaskDialogShell
+        open={reorderOpen}
+        onClose={() => setReorderOpen(false)}
+        titleRow={
+          <div className="px-5 pt-5 md:px-6">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-lg font-semibold text-slate-900">주제 순서 변경</div>
+              <button
+                type="button"
+                onClick={() => setReorderOpen(false)}
+                className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
+                aria-label="닫기"
+              >
+                <span aria-hidden="true" className="text-xl leading-none">
+                  ×
+                </span>
+              </button>
+            </div>
+          </div>
+        }
+        footer={
+          <div className="sticky bottom-0 border-t border-slate-100 bg-white/95 px-5 py-4 backdrop-blur md:px-6">
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setSubjectOrder(activeExamId, reorderDraft)
+                  setReorderOpen(false)
+                }}
+                className="inline-flex h-10 w-full items-center justify-center rounded-xl bg-slate-900 px-3 py-2 text-sm font-medium text-white transition hover:bg-slate-800"
+              >
+                완료
+              </button>
+              <button
+                type="button"
+                onClick={() => setReorderOpen(false)}
+                className="inline-flex h-10 w-full items-center justify-center rounded-xl bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-200"
+              >
+                취소
+              </button>
+            </div>
+          </div>
+        }
+      >
+        <div className="px-5 pb-4 pt-4 md:px-6">
+          <div className="space-y-2">
+            {reorderDraft.map((subjectId, idx) => {
+              const subject = scopedSubjectsOrdered.find((s) => s.id === subjectId)
+              if (!subject) return null
+              return (
+                <div key={subjectId} className="flex items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2">
+                  <div className="min-w-0">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="h-4 w-2 rounded-full" style={{ background: subject.color }} aria-hidden="true" />
+                      <div className="min-w-0 truncate text-sm font-semibold text-slate-900">{subject.name}</div>
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={idx === 0}
+                      onClick={() =>
+                        setReorderDraft((prev) => {
+                          const next = prev.slice()
+                          ;[next[idx - 1], next[idx]] = [next[idx], next[idx - 1]]
+                          return next
+                        })
+                      }
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-30"
+                      aria-label="위로"
+                    >
+                      ↑
+                    </button>
+                    <button
+                      type="button"
+                      disabled={idx === reorderDraft.length - 1}
+                      onClick={() =>
+                        setReorderDraft((prev) => {
+                          const next = prev.slice()
+                          ;[next[idx + 1], next[idx]] = [next[idx], next[idx + 1]]
+                          return next
+                        })
+                      }
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-30"
+                      aria-label="아래로"
+                    >
+                      ↓
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      </TaskDialogShell>
     </div>
   )
 }
