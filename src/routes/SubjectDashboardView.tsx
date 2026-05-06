@@ -1168,7 +1168,7 @@ export function SubjectDashboardView() {
                     <div className="flex flex-col gap-2.5 py-1">
                       <div className="grid grid-cols-[40px_minmax(0,1fr)_auto] items-center gap-2">
                         <span className="text-sm font-semibold text-slate-400">계획</span>
-                        <div className="h-3.5 w-full overflow-hidden rounded-full bg-transparent">
+                        <div className="h-1.5 w-full overflow-hidden rounded-full bg-transparent">
                           <div className="h-full overflow-hidden rounded-full" style={{ width: `${aggregate.plannedPct}%` }}>
                             <div className="flex h-full w-full overflow-hidden rounded-full">
                               {aggregate.plannedBySubject.length ? (
@@ -1194,7 +1194,7 @@ export function SubjectDashboardView() {
                       </div>
                       <div className="grid grid-cols-[40px_minmax(0,1fr)_auto] items-center gap-2">
                         <span className="text-sm font-semibold text-slate-900">완료</span>
-                        <div className="h-3.5 w-full overflow-hidden rounded-full bg-transparent">
+                        <div className="h-1.5 w-full overflow-hidden rounded-full bg-transparent">
                           <div className="h-full overflow-hidden rounded-full" style={{ width: `${aggregate.completedPct}%` }}>
                             <div className="flex h-full w-full overflow-hidden rounded-full">
                               {aggregate.completedBySubject.length ? (
