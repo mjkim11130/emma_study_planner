@@ -6,6 +6,7 @@ import { useAuth } from '../auth/AuthContext'
 import { getSupabase, supabaseConfigOk } from '../lib/supabaseClient'
 import { MobileTopBar } from '../components/MobileTopBar'
 import { TimePickerModal } from '../components/TimePicker'
+import { exportSeasonTasksToXlsx } from '../lib/excelExport'
 
 function hmToMinutesLocal(hm?: string) {
   if (!hm) return null
@@ -79,6 +80,8 @@ export function SettingsView() {
   const updateExam = usePlannerStore((s) => s.updateExam)
   const deleteExam = usePlannerStore((s) => s.deleteExam)
   const resetAll = usePlannerStore((s) => s.resetAll)
+  const subjects = usePlannerStore((s) => s.subjects)
+  const tasks = usePlannerStore((s) => s.tasks)
 
   const activeExams = useMemo(() => exams.filter((e) => e.status === 'active'), [exams])
 
@@ -236,16 +239,31 @@ export function SettingsView() {
                   </div>
                 </div>
               </button>
-              <Button
-                variant={e.id === activeExamId ? 'secondary' : 'secondary'}
-                onClick={() => {
-                  setExamEditorMode('edit')
-                  setExamEditorId(e.id)
-                  setExamEditorOpen(true)
-                }}
-              >
-                편집
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="secondary"
+                  onClick={() =>
+                    exportSeasonTasksToXlsx({
+                      seasonId: e.id,
+                      seasonName: e.name,
+                      subjects,
+                      tasks,
+                    })
+                  }
+                >
+                  내보내기
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    setExamEditorMode('edit')
+                    setExamEditorId(e.id)
+                    setExamEditorOpen(true)
+                  }}
+                >
+                  편집
+                </Button>
+              </div>
             </div>
           ))}
         </div>
