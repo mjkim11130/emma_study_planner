@@ -72,15 +72,32 @@ function nowIso() {
   return new Date().toISOString()
 }
 
+function nextSeasonName(existingNames: string[], base = '새 시즌') {
+  const norm = (s: string) => (s ?? '').trim()
+  const used = new Set(existingNames.map(norm).filter(Boolean))
+  if (!used.has(base)) return base
+  let max = 1
+  for (const n of used) {
+    const m = new RegExp(`^${base.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')}\\s*(\\d+)$`).exec(n)
+    if (!m) continue
+    const v = Number(m[1])
+    if (Number.isFinite(v)) max = Math.max(max, v)
+  }
+  return `${base} ${max + 1}`
+}
+
+function defaultSubjectsForExam(examId: string, createdAt: string): Subject[] {
+  return [
+    { id: randomId('sub'), examId, name: '중요', color: '#fecaca', archived: false, createdAt },
+    { id: randomId('sub'), examId, name: '일반', color: '#e5e7eb', archived: false, createdAt },
+  ]
+}
+
 const seed = () => {
   const createdAt = nowIso()
   const exam1Id = 'exam_1'
-  const exams: Exam[] = [{ id: exam1Id, name: '기본 시험', status: 'active', createdAt }]
-  const subjects: Subject[] = [
-    { id: 'sub_math', examId: exam1Id, name: '수학', color: '#2563eb', createdAt },
-    { id: 'sub_eng', examId: exam1Id, name: '영어', color: '#16a34a', createdAt },
-    { id: 'sub_kor', examId: exam1Id, name: '국어', color: '#f97316', createdAt },
-  ]
+  const exams: Exam[] = [{ id: exam1Id, name: '새 시즌', status: 'active', createdAt }]
+  const subjects: Subject[] = defaultSubjectsForExam(exam1Id, createdAt)
   return {
     exams,
     activeExamId: exam1Id,
@@ -99,9 +116,14 @@ export const usePlannerStore = create<PlannerState>()(
       addExam: (name) => {
         const id = randomId('exam')
         const createdAt = nowIso()
-        set((state) => ({
-          exams: [...state.exams, { id, name: name.trim() || '새 시험', status: 'active', createdAt }],
-        }))
+        set((state) => {
+          const nextName = name.trim() || nextSeasonName(state.exams.map((e) => e.name), '새 시즌')
+          const nextSubjects = [...state.subjects, ...defaultSubjectsForExam(id, createdAt)]
+          return {
+            exams: [...state.exams, { id, name: nextName, status: 'active', createdAt }],
+            subjects: nextSubjects,
+          }
+        })
         return id
       },
       setExamStatus: (examId, status) =>

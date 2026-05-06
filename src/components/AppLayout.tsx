@@ -111,9 +111,7 @@ export function AppLayout() {
   const location = useLocation()
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const hideBottom = false
-  const exams = usePlannerStore((s) => s.exams)
   const activeExamId = usePlannerStore((s) => s.activeExamId)
-  const setActiveExam = usePlannerStore((s) => s.setActiveExam)
   const subjects = usePlannerStore((s) => s.subjects)
   const tasks = usePlannerStore((s) => s.tasks)
   const updateTask = usePlannerStore((s) => s.updateTask)
@@ -224,30 +222,11 @@ export function AppLayout() {
           <div className={`grid h-full w-full grid-cols-1 ${sidebarOpen ? 'md:grid-cols-[260px_1fr]' : 'md:grid-cols-[1fr]'}`}>
             <aside className={`${sidebarOpen ? 'md:flex' : 'md:hidden'} hidden border-r border-slate-200 bg-white p-3 md:min-h-0 md:flex-col`}>
             <div className="px-2 py-2 text-sm font-semibold text-slate-900">엠마 스터디플래너</div>
-            <div className="mt-2 rounded-3xl border border-slate-200 bg-white p-3 shadow-[0_10px_30px_rgba(15,23,42,0.06)]">
-              <div className="text-[11px] font-semibold text-slate-500">현재 시즌</div>
-              <select
-                className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-900 outline-none focus:border-slate-400"
-                value={activeExamId}
-                onChange={(e) => setActiveExam(e.target.value)}
-              >
-                {exams
-                  .filter((e) => e.status === 'active')
-                  .map((e) => (
-                  <option key={e.id} value={e.id}>
-                    {e.name}
-                  </option>
-                ))}
-              </select>
-            </div>
             <div className="mt-3 flex flex-col gap-1.5">
               <NavItem to="calendar" label="월별" icon={<IconCalendarMonth />} />
               <NavItem to={`/day/${todayYmd()}`} label="일별" icon={<IconCalendarViewDay />} active={isDayPage} />
               <NavItem to="dashboard" label="주제" icon={<IconFolder />} />
               <NavItem to="settings" label="설정" icon={<IconSettings />} />
-            </div>
-            <div className="mt-5 rounded-3xl bg-slate-50 p-3 text-xs font-medium text-slate-600">
-              목표시간 vs 실제시간을 비교 기록하세요.
             </div>
 
             {isCalendarPage ? (

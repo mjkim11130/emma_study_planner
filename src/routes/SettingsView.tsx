@@ -80,25 +80,6 @@ export function SettingsView() {
   const deleteExam = usePlannerStore((s) => s.deleteExam)
   const resetAll = usePlannerStore((s) => s.resetAll)
 
-  const debug = useMemo(() => {
-    const lastUserId = (() => {
-      try {
-        return window.localStorage.getItem('emma-study-planner:lastUserId')
-      } catch {
-        return null
-      }
-    })()
-    const hasPlannerLocal = (() => {
-      try {
-        return window.localStorage.getItem('emma-study-planner:v1') !== null
-      } catch {
-        return null
-      }
-    })()
-    return { lastUserId, hasPlannerLocal }
-  }, [])
-  const buildId = (globalThis as any).__BUILD_ID__ as string | undefined
-
   const activeExams = useMemo(() => exams.filter((e) => e.status === 'active'), [exams])
 
   const [defaultTimelineWindow, setDefaultTimelineWindow] = useState<TimelineWindow>(() => loadDefaultTimelineWindow())
@@ -133,11 +114,7 @@ export function SettingsView() {
         <CardHeader title="계정" />
         <div className="flex flex-col gap-2 px-4 py-3 md:flex-row md:items-center md:justify-between">
           <div className="flex flex-col gap-1">
-            <div className="text-sm text-slate-700">{user?.email ?? '로그인 사용자'}</div>
-            <div className="text-[11px] text-slate-500">build: {buildId ?? '-'}</div>
-            <div className="text-[11px] text-slate-500">user.id: {user?.id ?? '-'}</div>
-            <div className="text-[11px] text-slate-500">lastUserId: {debug.lastUserId ?? '-'}</div>
-            <div className="text-[11px] text-slate-500">local planner cache: {String(debug.hasPlannerLocal)}</div>
+            <div className="text-sm font-semibold text-slate-900">{user?.email ?? '로그인 사용자'}</div>
           </div>
           <div className="flex flex-col gap-2 md:flex-row md:items-center">
             <Button
