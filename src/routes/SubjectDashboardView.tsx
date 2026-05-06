@@ -16,6 +16,39 @@ const MIN_TWO_COL_ITEM_PX = 380
 const MASONRY_ROW_PX = 2
 const MASONRY_GAP_PX = 12
 
+function normalizeHexLocal(color: string) {
+  const raw = color.trim()
+  const hex = raw.startsWith('#') ? raw.slice(1) : raw
+  if (/^[0-9a-fA-F]{3}$/.test(hex)) return `#${hex[0]}${hex[0]}${hex[1]}${hex[1]}${hex[2]}${hex[2]}`.toLowerCase()
+  if (/^[0-9a-fA-F]{6}$/.test(hex)) return `#${hex}`.toLowerCase()
+  return raw.toLowerCase()
+}
+
+function mixHex(a: string, b: string, t: number) {
+  const ca = normalizeHexLocal(a)
+  const cb = normalizeHexLocal(b)
+  const ma = /^#([0-9a-f]{6})$/i.exec(ca)
+  const mb = /^#([0-9a-f]{6})$/i.exec(cb)
+  if (!ma || !mb) return a
+  const ta = Math.max(0, Math.min(1, t))
+  const ah = ma[1]
+  const bh = mb[1]
+  const ar = parseInt(ah.slice(0, 2), 16)
+  const ag = parseInt(ah.slice(2, 4), 16)
+  const ab = parseInt(ah.slice(4, 6), 16)
+  const br = parseInt(bh.slice(0, 2), 16)
+  const bg = parseInt(bh.slice(2, 4), 16)
+  const bb = parseInt(bh.slice(4, 6), 16)
+  const r = Math.round(ar * (1 - ta) + br * ta)
+  const g = Math.round(ag * (1 - ta) + bg * ta)
+  const bl = Math.round(ab * (1 - ta) + bb * ta)
+  return `#${[r, g, bl].map((x) => x.toString(16).padStart(2, '0')).join('')}`
+}
+
+function mutedSubjectColor(color: string) {
+  return mixHex(color, '#64748b', 0.45)
+}
+
 function MasonryGrid({
   minColPx,
   items,
@@ -781,7 +814,7 @@ function SubjectCard({
               {varianceLabel ? (
                 <div
                   className={`pt-0.5 text-center text-[13px] font-semibold tabular-nums ${
-                    varianceSeconds > 0 ? 'text-rose-700' : varianceSeconds < 0 ? 'text-emerald-700' : 'text-slate-600'
+                    varianceSeconds > 0 ? 'text-blue-700' : varianceSeconds < 0 ? 'text-rose-700' : 'text-slate-600'
                   }`}
                 >
                   {varianceLabel}
@@ -819,7 +852,7 @@ function SubjectCard({
           type="button"
           onClick={onAddTask}
           className="inline-flex h-10 flex-1 items-center justify-center rounded-xl px-4 text-sm font-semibold transition hover:opacity-90"
-          style={{ background: subject.color, color: pickReadableTextColor(subject.color) }}
+          style={{ background: mutedSubjectColor(subject.color), color: pickReadableTextColor(mutedSubjectColor(subject.color)) }}
         >
           + 일정 추가
         </button>
@@ -1177,12 +1210,12 @@ export function SubjectDashboardView() {
                                     key={seg.subjectId}
                                     className="h-full"
                                     style={{
-                                      background: seg.color,
-                                      opacity: 0.35,
-                                      width: `${(seg.seconds / Math.max(aggregate.plannedSecondsCompletedOnly, 1)) * 100}%`,
-                                      minWidth: seg.seconds > 0 ? 1 : undefined,
-                                    }}
-                                  />
+                                    background: seg.color,
+                                    opacity: 0.35,
+                                    width: `${(seg.seconds / Math.max(aggregate.plannedSecondsCompletedOnly, 1)) * 100}%`,
+                                    minWidth: seg.seconds > 0 ? 1 : undefined,
+                                  }}
+                                />
                                 ))
                               ) : null}
                             </div>
@@ -1202,12 +1235,13 @@ export function SubjectDashboardView() {
                                   <div
                                     key={seg.subjectId}
                                     className="h-full"
-                                    style={{
-                                      background: seg.color,
-                                      width: `${(seg.seconds / Math.max(aggregate.completedSecondsCompletedOnly, 1)) * 100}%`,
-                                      minWidth: seg.seconds > 0 ? 1 : undefined,
-                                    }}
-                                  />
+                                  style={{
+                                    background: mutedSubjectColor(seg.color),
+                                    opacity: 0.55,
+                                    width: `${(seg.seconds / Math.max(aggregate.completedSecondsCompletedOnly, 1)) * 100}%`,
+                                    minWidth: seg.seconds > 0 ? 1 : undefined,
+                                  }}
+                                />
                                 ))
                               ) : null}
                             </div>
@@ -1220,7 +1254,7 @@ export function SubjectDashboardView() {
                       {aggregate.varianceLabel ? (
                         <div
                           className={`pt-0.5 text-center text-[13px] font-semibold tabular-nums ${
-                            aggregate.varianceSeconds > 0 ? 'text-rose-700' : aggregate.varianceSeconds < 0 ? 'text-emerald-700' : 'text-slate-600'
+                            aggregate.varianceSeconds > 0 ? 'text-blue-700' : aggregate.varianceSeconds < 0 ? 'text-rose-700' : 'text-slate-600'
                           }`}
                         >
                           {aggregate.varianceLabel}

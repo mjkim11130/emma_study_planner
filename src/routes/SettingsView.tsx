@@ -25,6 +25,17 @@ function minutesToHm(min: number) {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
 }
 
+function formatMeridiemHm(hm: string) {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(hm)
+  if (!match) return hm
+  const hours24 = Number(match[1])
+  const minutes = Number(match[2])
+  if (!Number.isFinite(hours24) || !Number.isFinite(minutes)) return hm
+  const meridiem = hours24 < 12 ? '오전' : '오후'
+  const hours12 = hours24 % 12 === 0 ? 12 : hours24 % 12
+  return `${meridiem} ${String(hours12).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`
+}
+
 function snap10(min: number) {
   return Math.max(0, Math.min(24 * 60 - 10, Math.round(min / 10) * 10))
 }
@@ -172,7 +183,7 @@ export function SettingsView() {
         <CardHeader title="타임라인 범위" />
         <div className="grid grid-cols-1 gap-3 px-4 py-4 md:grid-cols-[160px_160px_1fr]">
           <div>
-            <div className="mb-1 text-xs font-semibold text-slate-600">보이는 시작</div>
+            <div className="mb-1 text-xs font-semibold text-slate-600">시작</div>
             <button
               type="button"
               onClick={() => {
@@ -181,11 +192,11 @@ export function SettingsView() {
               }}
               className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-left text-sm font-semibold text-slate-900 outline-none hover:bg-slate-50 focus:border-slate-400"
             >
-              {minutesToHm(defaultTimelineWindow.startMin)}
+              {formatMeridiemHm(minutesToHm(defaultTimelineWindow.startMin))}
             </button>
           </div>
           <div>
-            <div className="mb-1 text-xs font-semibold text-slate-600">보이는 종료</div>
+            <div className="mb-1 text-xs font-semibold text-slate-600">종료</div>
             <button
               type="button"
               onClick={() => {
@@ -194,19 +205,17 @@ export function SettingsView() {
               }}
               className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-left text-sm font-semibold text-slate-900 outline-none hover:bg-slate-50 focus:border-slate-400"
             >
-              {minutesToHm(Math.max(defaultTimelineWindow.startMin + 10, defaultTimelineWindow.endMin))}
+              {formatMeridiemHm(minutesToHm(Math.max(defaultTimelineWindow.startMin + 10, defaultTimelineWindow.endMin)))}
             </button>
           </div>
-          <div className="text-sm text-slate-600 md:self-end">
-            기본값: <span className="font-semibold">09:00 ~ 24:00</span> (날짜별로는 Day 페이지에서 별도 설정 가능)
-          </div>
+          <div />
         </div>
       </Card>
 
       <Card>
-        <CardHeader title="시험 관리" subtitle="시험 단위로 주제/일정이 분리됩니다." />
+        <CardHeader title="시즌 관리" subtitle="시즌 단위로 주제/일정이 분리됩니다." />
         <div className="flex items-center justify-between gap-2 px-4 py-3">
-          <div className="text-sm font-semibold text-slate-700">시험을 1개 선택하면 전체 데이터에 적용됩니다.</div>
+          <div className="text-sm font-semibold text-slate-700">시즌을 1개 선택하면 전체 데이터에 적용됩니다.</div>
           <Button
             onClick={() => {
               setExamEditorMode('add')
@@ -214,12 +223,12 @@ export function SettingsView() {
               setExamEditorOpen(true)
             }}
           >
-            + 시험 등록
+            + 시즌 등록
           </Button>
         </div>
 
         <div className="divide-y divide-slate-100 px-2 pb-2">
-          {activeExams.length === 0 ? <div className="px-4 py-4 text-sm text-slate-500">진행중 시험이 없어요.</div> : null}
+          {activeExams.length === 0 ? <div className="px-4 py-4 text-sm text-slate-500">진행중 시즌이 없어요.</div> : null}
           {activeExams.map((e) => (
             <div
               key={e.id}
@@ -231,7 +240,7 @@ export function SettingsView() {
                 type="button"
                 onClick={() => setActiveExam(e.id)}
                 className="min-w-0 flex-1 text-left"
-                aria-label="시험 선택"
+                aria-label="시즌 선택"
               >
                 <div className="flex min-w-0 items-center gap-2">
                   <span
@@ -245,7 +254,7 @@ export function SettingsView() {
                   <div className="min-w-0">
                     <div className="truncate text-sm font-semibold">{e.name}</div>
                     <div className={`mt-0.5 text-xs tabular-nums ${e.id === activeExamId ? 'text-white/80' : 'text-slate-500'}`}>
-                      D-day: {e.examDate ? e.examDate : '-'}
+                      시즌 종료일: {e.examDate ? e.examDate : '-'}
                     </div>
                   </div>
                 </div>
@@ -267,7 +276,7 @@ export function SettingsView() {
 
       <TimePickerModal
         open={timelinePickerOpen}
-        title={timelinePickerField === 'start' ? '보이는 시작' : '보이는 종료'}
+        title={timelinePickerField === 'start' ? '시작' : '종료'}
         initialHm={
           timelinePickerField === 'start'
             ? minutesToHm(defaultTimelineWindow.startMin)
@@ -310,7 +319,7 @@ export function SettingsView() {
         >
           <div className="w-full max-w-md rounded-2xl bg-white p-4 shadow-2xl" onMouseDown={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between gap-2">
-              <div className="text-base font-semibold text-slate-900">{examEditorMode === 'add' ? '시험 등록' : '시험 편집'}</div>
+              <div className="text-base font-semibold text-slate-900">{examEditorMode === 'add' ? '시즌 등록' : '시즌 편집'}</div>
               <button
                 type="button"
                 onClick={() => setExamEditorOpen(false)}
@@ -325,11 +334,11 @@ export function SettingsView() {
 
             <div className="mt-3 space-y-3">
               <div>
-                <div className="mb-1 text-xs font-semibold text-slate-600">시험 이름</div>
+                <div className="mb-1 text-xs font-semibold text-slate-600">시즌 이름</div>
                 <Input value={examEditorName} onChange={setExamEditorName} placeholder="예: 2026-1 중간고사" />
               </div>
               <div>
-                <div className="mb-1 text-xs font-semibold text-slate-600">D-day</div>
+                <div className="mb-1 text-xs font-semibold text-slate-600">시즌 종료일</div>
                 <input
                   type="date"
                   value={examEditorDate}
@@ -350,7 +359,7 @@ export function SettingsView() {
                     return
                   }
                   if (!examEditorId) return
-                  updateExam(examEditorId, { name: examEditorName.trim() || '시험', examDate: examEditorDate.trim() || undefined })
+                  updateExam(examEditorId, { name: examEditorName.trim() || '시즌', examDate: examEditorDate.trim() || undefined })
                   setExamEditorOpen(false)
                 }}
               >
@@ -365,7 +374,7 @@ export function SettingsView() {
                 <Button
                   variant="danger"
                   onClick={() => {
-                    const ok = window.confirm('이 시험을 삭제할까요? 해당 시험의 주제/일정도 함께 삭제됩니다.')
+                    const ok = window.confirm('이 시즌을 삭제할까요? 해당 시즌의 주제/일정도 함께 삭제됩니다.')
                     if (!ok) return
                     deleteExam(examEditorId)
                     setExamEditorOpen(false)

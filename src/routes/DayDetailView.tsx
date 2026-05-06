@@ -698,7 +698,7 @@ export function DayDetailView() {
                             {deltaMin === 0 ? null : (
                               <span
                                 className={`rounded-full bg-white/70 px-1.5 py-0.5 text-[10px] font-semibold leading-none ${
-                                  deltaMin > 0 ? 'text-rose-700' : 'text-emerald-700'
+                                  deltaMin > 0 ? 'text-blue-700' : 'text-rose-700'
                                 }`}
                               >
                                 {deltaMin > 0 ? `+ ${formatDurationKoFromMinutes(deltaMin)}` : `- ${formatDurationKoFromMinutes(Math.abs(deltaMin))}`}

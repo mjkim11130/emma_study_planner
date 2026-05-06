@@ -66,7 +66,7 @@ export function SubjectManagerView() {
       </Card>
 
       <Card>
-        <CardHeader title="과목 목록" subtitle="현재 선택한 시험의 과목만 표시됩니다." />
+        <CardHeader title="과목 목록" subtitle="현재 선택한 시즌의 과목만 표시됩니다." />
         <div className="divide-y divide-slate-100">
           {scopedSubjects.map((s) => (
             <div key={s.id} className="grid grid-cols-1 gap-2 px-4 py-3 md:grid-cols-[1fr_220px_110px]">

@@ -676,7 +676,7 @@ export function CalendarView() {
   const examMetaLabel = useMemo(() => {
     if (!activeExam) return null
     if (!examCountdown) return activeExam.name?.trim() || null
-    const name = activeExam.name?.trim() || '시험'
+    const name = activeExam.name?.trim() || '시즌'
     const weeksLeft = typeof examCountdown.weeksLeft === 'number' ? examCountdown.weeksLeft : null
     const weekLabel = weeksLeft !== null ? `${name} ${weeksLeft}주 전` : name
     return `${weekLabel} · ${examCountdown.dday}`

@@ -53,7 +53,7 @@ export function MobileTopBar({
         </div>
         <div className="flex shrink-0 items-center justify-end">{right}</div>
       </div>
-      {bottom ? <div className="px-3 pb-2">{bottom}</div> : null}
+      {bottom ? <div className="px-3">{bottom}</div> : null}
     </div>
   )
 }

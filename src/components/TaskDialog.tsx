@@ -132,12 +132,14 @@ function CompareRail({
   goalLabel,
   actualLabel,
   deltaLabel,
+  deltaSeconds,
   goalSeconds,
   actualSeconds,
 }: {
   goalLabel: string
   actualLabel: string
   deltaLabel: string
+  deltaSeconds: number
   goalSeconds: number
   actualSeconds: number
 }) {
@@ -160,7 +162,13 @@ function CompareRail({
         </div>
         <span className="text-right text-[15px] font-semibold tabular-nums text-slate-900">{actualLabel}</span>
       </div>
-      <div className="pt-1 text-center text-base font-semibold text-slate-700">{deltaLabel}</div>
+      <div
+        className={`pt-1 text-center text-base font-semibold tabular-nums ${
+          deltaSeconds > 0 ? 'text-blue-700' : deltaSeconds < 0 ? 'text-rose-700' : 'text-slate-600'
+        }`}
+      >
+        {deltaLabel}
+      </div>
     </div>
   )
 }
@@ -403,6 +411,7 @@ export function TaskDialog() {
         goalLabel: formatDurationGraphKo(previewTask.plannedSeconds),
         actualLabel: formatDurationGraphKo(previewTask.actualSeconds),
         deltaLabel: '정확히 완료',
+        deltaSeconds: 0,
         goalSeconds: previewTask.plannedSeconds,
         actualSeconds: previewTask.actualSeconds,
       }
@@ -410,7 +419,8 @@ export function TaskDialog() {
     return {
       goalLabel: formatDurationGraphKo(previewTask.plannedSeconds),
       actualLabel: formatDurationGraphKo(previewTask.actualSeconds),
-      deltaLabel: variance < 0 ? `${formatDurationGraphKo(Math.abs(variance))} 일찍 완료` : `${formatDurationGraphKo(Math.abs(variance))} 오래 지속`,
+      deltaLabel: variance < 0 ? `- ${formatDurationGraphKo(Math.abs(variance))}` : `+ ${formatDurationGraphKo(Math.abs(variance))}`,
+      deltaSeconds: variance,
       goalSeconds: previewTask.plannedSeconds,
       actualSeconds: previewTask.actualSeconds,
     }
@@ -935,6 +945,7 @@ export function TaskDialog() {
                     goalLabel={previewActualSummary.goalLabel}
                     actualLabel={previewActualSummary.actualLabel}
                     deltaLabel={previewActualSummary.deltaLabel}
+                    deltaSeconds={previewActualSummary.deltaSeconds}
                     goalSeconds={previewActualSummary.goalSeconds}
                     actualSeconds={previewActualSummary.actualSeconds}
                   />
