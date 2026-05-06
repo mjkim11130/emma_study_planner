@@ -1,12 +1,13 @@
 import { createContext, useMemo, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { usePlannerStore } from '../store/usePlannerStore'
-import { formatRoundedDurationKoFromSeconds } from '../lib/time'
+import { formatDurationKoFromSeconds } from '../lib/time'
+import { todayYmd } from '../lib/dates'
 import { Button } from './ui'
-import { NewTaskSheet, type NewTaskSheetInitial } from './NewTaskSheet'
+import { TaskDialogContext } from './TaskDialogContext'
+import { TaskDialog } from './TaskDialog'
 
 export const SidebarToggleContext = createContext<{ open: boolean; toggle: () => void } | null>(null)
-export const NewTaskSheetContext = createContext<{ openSheet: (initial?: NewTaskSheetInitial) => void } | null>(null)
 
 const normalizeHex = (color: string) => {
   const raw = color.trim()
@@ -65,33 +66,53 @@ export function AppLayout() {
   const location = useLocation()
   const navigate = useNavigate()
   const [sidebarOpen, setSidebarOpen] = useState(true)
-  const [newTaskSheetOpen, setNewTaskSheetOpen] = useState(false)
-  const [newTaskSheetInitial, setNewTaskSheetInitial] = useState<NewTaskSheetInitial | null>(null)
-  const hideBottom = location.pathname.includes('/task/')
+  const hideBottom = false
   const exams = usePlannerStore((s) => s.exams)
   const activeExamId = usePlannerStore((s) => s.activeExamId)
   const setActiveExam = usePlannerStore((s) => s.setActiveExam)
   const subjects = usePlannerStore((s) => s.subjects)
   const tasks = usePlannerStore((s) => s.tasks)
   const updateTask = usePlannerStore((s) => s.updateTask)
+  const lastUsedSubjectIdByExam = usePlannerStore((s) => s.lastUsedSubjectIdByExam)
+  const isCalendarPage = location.pathname.startsWith('/calendar')
+  const isDayPage = location.pathname.startsWith('/day/')
+  const dayPageMatch = /^\/day\/(\d{4}-\d{2}-\d{2})$/.exec(location.pathname)
+  const dayPageDate = dayPageMatch?.[1] ?? ''
+  const isDayListMode = Boolean(dayPageDate) && new URLSearchParams(location.search).get('view') === 'list'
+  const [taskDialogRequest, setTaskDialogRequest] = useState<null | { mode: 'add'; date?: string; subjectId?: string } | { mode: 'preview'; taskId: string; autoEdit?: boolean; autoCloseAfterComplete?: boolean }>(null)
 
-  const openNewTaskSheet = (initial?: NewTaskSheetInitial) => {
-    if (!(subjects.find((s) => s.examId === activeExamId)?.id ?? subjects[0]?.id)) {
+  const createTaskAndOpen = () => {
+    const fallbackSubjectId =
+      (lastUsedSubjectIdByExam[activeExamId] && subjects.some((s) => s.id === lastUsedSubjectIdByExam[activeExamId])
+        ? lastUsedSubjectIdByExam[activeExamId]
+        : null) ??
+      subjects.find((s) => s.examId === activeExamId)?.id ??
+      subjects[0]?.id ??
+      ''
+    if (!fallbackSubjectId) {
       navigate('/subjects')
       return
     }
-    setNewTaskSheetInitial(initial ?? null)
-    setNewTaskSheetOpen(true)
+    setTaskDialogRequest({ mode: 'add', subjectId: fallbackSubjectId })
+  }
+
+  const createTaskAndOpenForDay = (date: string) => {
+    const fallbackSubjectId =
+      (lastUsedSubjectIdByExam[activeExamId] && subjects.some((s) => s.id === lastUsedSubjectIdByExam[activeExamId])
+        ? lastUsedSubjectIdByExam[activeExamId]
+        : null) ??
+      subjects.find((s) => s.examId === activeExamId)?.id ??
+      subjects[0]?.id ??
+      ''
+    if (!fallbackSubjectId) {
+      navigate('/subjects')
+      return
+    }
+    setTaskDialogRequest({ mode: 'add', subjectId: fallbackSubjectId, date })
   }
 
   const openTaskPreview = (taskId: string) => {
-    if (location.pathname.startsWith('/calendar')) {
-      const next = new URLSearchParams(location.search)
-      next.set('previewTaskId', taskId)
-      navigate({ pathname: location.pathname, search: `?${next.toString()}` })
-      return
-    }
-    navigate(`/task/${taskId}`)
+    setTaskDialogRequest({ mode: 'preview', taskId })
   }
 
   const unassignedPending = useMemo(
@@ -115,9 +136,24 @@ export function AppLayout() {
     return groups
   }, [unassignedPending])
 
+  const dayUnscheduled = useMemo(() => {
+    if (!dayPageDate) return []
+    return tasks
+      .filter((t) => t.examId === activeExamId && t.date === dayPageDate && !t.actualStartTime && !t.plannedStartTime)
+      .slice()
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+  }, [tasks, activeExamId, dayPageDate])
+
   return (
-    <SidebarToggleContext.Provider value={{ open: sidebarOpen, toggle: () => setSidebarOpen((cur) => !cur) }}>
-      <NewTaskSheetContext.Provider value={{ openSheet: openNewTaskSheet }}>
+    <TaskDialogContext.Provider
+      value={{
+        openTaskAdd: (input) => setTaskDialogRequest({ mode: 'add', ...input }),
+        openTaskPreview: (taskId, opts) => setTaskDialogRequest({ mode: 'preview', taskId, ...opts }),
+        request: taskDialogRequest,
+        clearRequest: () => setTaskDialogRequest(null),
+      }}
+    >
+      <SidebarToggleContext.Provider value={{ open: sidebarOpen, toggle: () => setSidebarOpen((cur) => !cur) }}>
         <div className="h-full [--bottom-nav-h:72px]">
           <div className={`grid h-full w-full grid-cols-1 ${sidebarOpen ? 'md:grid-cols-[260px_1fr]' : 'md:grid-cols-[1fr]'}`}>
             <aside className={`${sidebarOpen ? 'md:flex' : 'md:hidden'} hidden border-r border-slate-200 bg-white p-3 md:min-h-0 md:flex-col`}>
@@ -139,58 +175,151 @@ export function AppLayout() {
               </select>
             </div>
             <div className="mt-2 flex flex-col gap-1">
-              <NavItem to="calendar" label="캘린더" />
-              <NavItem to="dashboard" label="대시보드" />
-              <NavItem to="subjects" label="과목 관리" />
+              <NavItem to="calendar" label="월별" />
+              <NavLink
+                to={`/day/${todayYmd()}`}
+                className={() =>
+                  `rounded-xl px-3 py-2 text-sm font-medium ${isDayPage ? 'bg-slate-900 text-white' : 'text-slate-700 hover:bg-slate-100'}`
+                }
+              >
+                일별
+              </NavLink>
+              <NavItem to="dashboard" label="과목별" />
               <NavItem to="settings" label="설정" />
             </div>
             <div className="mt-6 rounded-2xl bg-slate-50 p-3 text-xs text-slate-600">
               목표시간 vs 실제시간을 비교 기록하세요.
             </div>
 
-            <div className="mt-3 flex min-h-0 flex-1 flex-col rounded-2xl border border-slate-200 bg-white">
-              <div className="flex items-center justify-between px-3 py-2">
-                <div className="flex items-center gap-2">
-                  <div className="text-[12px] font-semibold text-slate-900">시작 예정</div>
-                  {unassignedPending.length ? (
-                    <div className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-700 tabular-nums">
-                      {unassignedPending.length}
-                    </div>
-                  ) : null}
+            {isCalendarPage ? (
+              <div className="mt-3 flex min-h-0 flex-1 flex-col rounded-2xl border border-slate-200 bg-white">
+                <div className="flex items-center justify-between px-3 py-2">
+                  <div className="flex items-center gap-2">
+                    <div className="text-[12px] font-semibold text-slate-900">시작 예정</div>
+                    {unassignedPending.length ? (
+                      <div className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-700 tabular-nums">
+                        {unassignedPending.length}
+                      </div>
+                    ) : null}
+                  </div>
+                  <Button onClick={createTaskAndOpen}>+ 일정 추가</Button>
                 </div>
-                <Button onClick={() => openNewTaskSheet()}>
-                  + 일정 추가
-                </Button>
-              </div>
-              <div
-                className="min-h-0 flex-1 border-t border-slate-100 p-2"
-                onDragOver={(e) => {
-                  e.preventDefault()
-                }}
-                onDrop={(e) => {
-                  e.preventDefault()
-                  const taskId = e.dataTransfer.getData('text/emma-task-id')
-                  if (taskId) updateTask(taskId, { date: '' })
-                }}
-              >
-                <div className="h-full min-h-0 overflow-y-auto overscroll-contain pr-1">
-                  <div className="space-y-2">
-                    {unassignedBySubject.map((g) => {
-                      const subject = subjects.find((s) => s.id === g.subjectId)
-                      return (
-                        <div key={g.subjectId}>
-                          <div className="mb-1 overflow-hidden whitespace-nowrap text-[11px] font-semibold text-slate-700">
-                            {truncateText(subject?.name ?? '과목', 18)}
+                <div
+                  className="min-h-0 flex-1 border-t border-slate-100 p-2"
+                  onDragOver={(e) => {
+                    e.preventDefault()
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault()
+                    const taskId = e.dataTransfer.getData('text/emma-task-id')
+                    if (taskId) updateTask(taskId, { date: '' })
+                  }}
+                >
+                  <div className="h-full min-h-0 overflow-y-auto overscroll-contain pr-1">
+                    <div className="space-y-2">
+                      {unassignedBySubject.map((g) => {
+                        const subject = subjects.find((s) => s.id === g.subjectId)
+                        return (
+                          <div key={g.subjectId}>
+                            <div className="mb-1 overflow-hidden whitespace-nowrap text-[11px] font-semibold text-slate-700">
+                              {truncateText(subject?.name ?? '과목', 18)}
+                            </div>
+                            <div className="grid grid-cols-2 gap-1">
+                              {g.list.map((t) => {
+                                const sub = subjects.find((s) => s.id === t.subjectId)
+                                const bg = sub?.color ?? '#94a3b8'
+                                const textColor = pickReadableTextColor(bg)
+                                const dday = formatDday(t.dueDate)
+                                const hasActual = typeof t.actualSeconds === 'number' && Number.isFinite(t.actualSeconds)
+                                const secondsToShow = hasActual ? (t.actualSeconds as number) : t.plannedSeconds
+                                const timeLabelKo = formatDurationKoFromSeconds(secondsToShow)
+                                return (
+                                  <button
+                                    key={t.id}
+                                    type="button"
+                                    onClick={() => openTaskPreview(t.id)}
+                                    draggable
+                                    onDragStart={(e) => {
+                                      e.dataTransfer.setData('text/emma-task-id', t.id)
+                                      e.dataTransfer.effectAllowed = 'move'
+                                    }}
+                                    className="block min-w-0 select-none rounded-[3px] px-2 py-1 text-left text-[11px] leading-none"
+                                    style={{ background: bg, color: textColor }}
+                                  >
+                                    <div className="flex items-center justify-between gap-2">
+                                      <span className="min-w-0 overflow-hidden whitespace-nowrap">{truncateText(t.title, 16)}</span>
+                                      <span className="shrink-0 text-[10px] tabular-nums opacity-90">
+                                        <span className="bg-white/60 px-1 py-[1px] text-slate-700">{timeLabelKo}</span>
+                                        {dday ? (
+                                          <span className="ml-1 bg-white/60 px-1 py-[1px] font-semibold text-indigo-700">{dday}</span>
+                                        ) : null}
+                                      </span>
+                                    </div>
+                                  </button>
+                                )
+                              })}
+                            </div>
                           </div>
-                          <div className="grid grid-cols-2 gap-1">
-                            {g.list.map((t) => {
-                              const sub = subjects.find((s) => s.id === t.subjectId)
-                              const bg = sub?.color ?? '#94a3b8'
+                        )
+                      })}
+                      {!unassignedBySubject.length ? <div className="px-1 py-2 text-xs text-slate-400">비어있음</div> : null}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            {dayPageDate && !isDayListMode ? (
+              <div className="mt-3 flex min-h-0 flex-1 flex-col rounded-2xl border border-slate-200 bg-white">
+                <div className="flex items-center justify-between px-3 py-2">
+                  <div className="flex items-center gap-2">
+                    <div className="text-[12px] font-semibold text-slate-900">시간 미정</div>
+                    {dayUnscheduled.length ? (
+                      <div className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-700 tabular-nums">
+                        {dayUnscheduled.length}
+                      </div>
+                    ) : null}
+                  </div>
+                  <Button onClick={() => createTaskAndOpenForDay(dayPageDate)}>+ 일정 추가</Button>
+                </div>
+                <div
+                  className="min-h-0 flex-1 border-t border-slate-100 p-2"
+                  data-unscheduled-dropzone="true"
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => {
+                    e.preventDefault()
+                    const taskId = e.dataTransfer.getData('text/emma-task-id')
+                    if (taskId) updateTask(taskId, { plannedStartTime: undefined })
+                  }}
+                >
+                  <div className="h-full min-h-0 overflow-y-auto overscroll-contain pr-1">
+                    <div className="space-y-2">
+                      {(() => {
+                        type DayUnscheduledTask = (typeof dayUnscheduled)[number]
+                        const bySubject = new Map<
+                          string,
+                          { subjectId: string; subjectName: string; subjectColor: string; items: DayUnscheduledTask[] }
+                        >()
+                        for (const t of dayUnscheduled) {
+                          const sub = subjects.find((s) => s.id === t.subjectId)
+                          const subjectId = sub?.id ?? 'unknown'
+                          const subjectName = sub?.name ?? '과목'
+                          const subjectColor = sub?.color ?? '#94a3b8'
+                          const key = `${subjectId}:${subjectName}:${subjectColor}`
+                          const g = bySubject.get(key) ?? { subjectId, subjectName, subjectColor, items: [] as DayUnscheduledTask[] }
+                          g.items.push(t)
+                          bySubject.set(key, g)
+                        }
+                        const groups = Array.from(bySubject.values()).sort((a, b) => a.subjectName.localeCompare(b.subjectName))
+                        return groups.map((g) => (
+                          <div key={g.subjectId} className="space-y-2">
+                            <div className="px-1 text-[11px] font-semibold text-slate-600">{g.subjectName}</div>
+                            {g.items.map((t) => {
+                              const bg = g.subjectColor
                               const textColor = pickReadableTextColor(bg)
-                              const dday = formatDday(t.dueDate)
-                              const hasActual = typeof t.actualSeconds === 'number' && Number.isFinite(t.actualSeconds)
-                              const secondsToShow = hasActual ? (t.actualSeconds as number) : t.plannedSeconds
-                              const timeLabelKo = formatRoundedDurationKoFromSeconds(secondsToShow)
+                              const hasAnyRecord = Boolean(t.actualStartTime || t.actualEndTime || typeof t.actualSeconds === 'number')
+                              const isCompleted = t.status === 'completed' || hasAnyRecord
+                              const timeLabelKo = t.plannedSeconds ? formatDurationKoFromSeconds(t.plannedSeconds) : ''
                               return (
                                 <button
                                   key={t.id}
@@ -201,54 +330,92 @@ export function AppLayout() {
                                     e.dataTransfer.setData('text/emma-task-id', t.id)
                                     e.dataTransfer.effectAllowed = 'move'
                                   }}
-                                  className="block min-w-0 rounded-[3px] px-2 py-1 text-left text-[11px] leading-none hover:brightness-95"
+                                  className={`block w-full min-w-0 select-none rounded-lg px-3 py-2 text-left text-[12px] leading-tight shadow-sm ${
+                                    isCompleted ? 'saturate-[0.85] brightness-[0.97]' : ''
+                                  }`}
                                   style={{ background: bg, color: textColor }}
+                                  title="타임라인으로 드래그해서 배치"
                                 >
-                                  <div className="flex items-center justify-between gap-2">
-                                    <span className="min-w-0 overflow-hidden whitespace-nowrap">{truncateText(t.title, 16)}</span>
-                                    <span className="shrink-0 text-[10px] tabular-nums opacity-90">
-                                      <span className="bg-white/60 px-1 py-[1px] text-slate-700">{timeLabelKo}</span>
-                                      {dday ? (
-                                        <span className="ml-1 bg-white/60 px-1 py-[1px] font-semibold text-indigo-700">
-                                          {dday}
-                                        </span>
-                                      ) : null}
+                                  <div className="flex min-h-[36px] items-center justify-between gap-2">
+                                    <span className="min-w-0 overflow-hidden whitespace-nowrap">
+                                      <button
+                                        type="button"
+                                        className="mr-2 inline-flex h-4 w-4 items-center justify-center align-middle"
+                                        aria-label={isCompleted ? '완료 해제' : '완료 처리'}
+                                        onClick={(e) => {
+                                          e.stopPropagation()
+                                          if (isCompleted) {
+                                            updateTask(t.id, {
+                                              status: 'pending',
+                                              recordCompleteOnly: false,
+                                              actualStartTime: undefined,
+                                              actualEndTime: undefined,
+                                              actualSeconds: undefined,
+                                            })
+                                          } else {
+                                            const hasRecordedTime =
+                                              Boolean(t.actualStartTime && t.actualEndTime) || typeof t.actualSeconds === 'number'
+                                            updateTask(t.id, { status: 'completed', recordCompleteOnly: !hasRecordedTime })
+                                          }
+                                        }}
+                                      >
+                                        {isCompleted ? (
+                                          <svg viewBox="0 0 20 20" className="h-3.5 w-3.5" aria-hidden="true">
+                                            <rect x="2.5" y="2.5" width="15" height="15" rx="2.5" fill="none" stroke="currentColor" strokeWidth="2" />
+                                            <path d="M6 10.2l2.3 2.3L14.5 6.6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                          </svg>
+                                        ) : (
+                                          <svg viewBox="0 0 20 20" className="h-3.5 w-3.5" aria-hidden="true">
+                                            <rect x="2.5" y="2.5" width="15" height="15" rx="2.5" fill="none" stroke="currentColor" strokeWidth="2" />
+                                          </svg>
+                                        )}
+                                      </button>
+                                      <span className="align-middle font-semibold">{truncateText(t.title, 32)}</span>
+                                    </span>
+                                    <span className="shrink-0 text-[11px] tabular-nums opacity-90">
+                                      {timeLabelKo ? <span className="font-semibold">{timeLabelKo}</span> : null}
                                     </span>
                                   </div>
                                 </button>
                               )
                             })}
                           </div>
-                        </div>
-                      )
-                    })}
-                    {!unassignedBySubject.length ? <div className="px-1 py-2 text-xs text-slate-400">비어있음</div> : null}
+                        ))
+                      })()}
+                      {!dayUnscheduled.length ? <div className="px-1 py-2 text-xs text-slate-400">비어있음</div> : null}
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
+            ) : null}
             </aside>
             <main className="min-h-0 overflow-auto px-0 py-0 pb-[calc(var(--bottom-nav-h)+env(safe-area-inset-bottom))] md:p-3 md:pb-3">
               <Outlet />
             </main>
           </div>
-
           {!hideBottom ? (
             <div className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/95 backdrop-blur md:hidden">
               <div style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
                 <div className="mx-auto grid max-w-xl grid-cols-4 px-3 py-3 text-sm">
-                  <BottomNavItem to="calendar" label="캘린더" />
-                  <BottomNavItem to="dashboard" label="대시보드" />
-                  <BottomNavItem to="subjects" label="과목" />
+                  <BottomNavItem to="calendar" label="월별" />
+                  <NavLink
+                    to={`/day/${todayYmd()}`}
+                    className={() =>
+                      `mx-1 rounded-2xl px-3 py-4 text-center font-semibold ${isDayPage ? 'bg-slate-900 text-white' : 'text-slate-700'}`
+                    }
+                  >
+                    일별
+                  </NavLink>
+                  <BottomNavItem to="dashboard" label="과목별" />
                   <BottomNavItem to="settings" label="설정" />
                 </div>
               </div>
             </div>
           ) : null}
+          <TaskDialog />
         </div>
-        <NewTaskSheet open={newTaskSheetOpen} initial={newTaskSheetInitial} onClose={() => setNewTaskSheetOpen(false)} />
-      </NewTaskSheetContext.Provider>
-    </SidebarToggleContext.Provider>
+      </SidebarToggleContext.Provider>
+    </TaskDialogContext.Provider>
   )
 }
 

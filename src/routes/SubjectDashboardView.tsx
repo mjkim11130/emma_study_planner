@@ -1,24 +1,48 @@
-import { useContext, useMemo, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { useMemo, useState } from 'react'
+import { useNavigate, useParams } from 'react-router-dom'
 import { Button, Card, CardHeader, Input, Select } from '../components/ui'
 import { formatHmsFromSeconds } from '../lib/time'
 import { usePlannerStore } from '../store/usePlannerStore'
 import { MobileTopBar } from '../components/MobileTopBar'
-import { NewTaskSheetContext } from '../components/AppLayout'
+import { useTaskDialog } from '../components/TaskDialogContext'
 
 type Tab = 'all' | 'completed' | 'pending'
 
 export function SubjectDashboardView() {
-  const params = useParams()
   const navigate = useNavigate()
+  const params = useParams()
   const subjects = usePlannerStore((s) => s.subjects)
   const activeExamId = usePlannerStore((s) => s.activeExamId)
   const allTasks = usePlannerStore((s) => s.tasks)
-  const newTaskSheet = useContext(NewTaskSheetContext)
+  const lastUsedSubjectIdByExam = usePlannerStore((s) => s.lastUsedSubjectIdByExam)
+  const { openTaskAdd, openTaskPreview } = useTaskDialog()
   const subjectIdFromRoute = params.subjectId ?? ''
 
+  const createTaskAndClose = (input: { subjectId?: string; date?: string; plannedSeconds?: number }) => {
+    const fallbackSubjectId =
+      input.subjectId ??
+      ((lastUsedSubjectIdByExam[activeExamId] && subjects.some((s) => s.id === lastUsedSubjectIdByExam[activeExamId])
+        ? lastUsedSubjectIdByExam[activeExamId]
+        : null) ??
+        subjects.find((s) => s.examId === activeExamId)?.id ??
+        subjects[0]?.id ??
+        '')
+    if (!fallbackSubjectId) return
+    openTaskAdd({ date: input.date, subjectId: fallbackSubjectId })
+  }
+
   if (!subjectIdFromRoute) {
-    return <AllSubjectsDashboard subjects={subjects} allTasks={allTasks} activeExamId={activeExamId} onCreateTask={(input) => newTaskSheet?.openSheet(input)} onOpenSubject={(id) => navigate(`/dashboard/${id}`)} />
+    return (
+      <AllSubjectsDashboard
+        subjects={subjects}
+        allTasks={allTasks}
+        activeExamId={activeExamId}
+        onCreateTask={(input) => createTaskAndClose(input)}
+        onOpenSubject={(id) => navigate(`/dashboard/${id}`)}
+        onOpenTask={(id) => openTaskPreview(id)}
+        onManageSubjects={() => navigate('/subjects')}
+      />
+    )
   }
 
   return (
@@ -28,7 +52,9 @@ export function SubjectDashboardView() {
       allTasks={allTasks}
       activeExamId={activeExamId}
       onNavigate={(path) => navigate(path)}
-      onCreateTask={(input) => newTaskSheet?.openSheet(input)}
+      onCreateTask={(input) => createTaskAndClose(input)}
+      onOpenTask={(id) => openTaskPreview(id)}
+      onManageSubjects={() => navigate('/subjects')}
     />
   )
 }
@@ -39,6 +65,8 @@ function AllSubjectsDashboard({
   activeExamId,
   onCreateTask,
   onOpenSubject,
+  onOpenTask,
+  onManageSubjects,
 }: {
   subjects: { id: string; examId: string; name: string; color: string }[]
   allTasks: {
@@ -56,6 +84,8 @@ function AllSubjectsDashboard({
   activeExamId: string
   onCreateTask: (input: { subjectId: string; title: string; date?: string; plannedSeconds: number }) => void
   onOpenSubject: (subjectId: string) => void
+  onOpenTask: (taskId: string) => void
+  onManageSubjects: () => void
 }) {
   const [date, setDate] = useState('')
   const [title, setTitle] = useState('공부')
@@ -91,9 +121,16 @@ function AllSubjectsDashboard({
 
   return (
     <div className="flex flex-col gap-3">
-      <MobileTopBar title="대시보드" />
+      <MobileTopBar
+        title="과목별"
+        right={
+          <Button variant="secondary" onClick={onManageSubjects}>
+            과목관리
+          </Button>
+        }
+      />
       <Card>
-        <CardHeader title="대시보드" />
+        <CardHeader title="과목별" />
         <div className="grid grid-cols-1 gap-2 px-4 py-3 md:grid-cols-[220px_1fr_140px_120px_120px]">
           <div>
             <div className="mb-1 text-xs font-semibold text-slate-600">과목</div>
@@ -124,7 +161,7 @@ function AllSubjectsDashboard({
             <div className="mt-1 text-[11px] text-slate-500">비워두면 “미배치”로 생성됩니다.</div>
           </div>
           <div>
-            <div className="mb-1 text-xs font-semibold text-slate-600">목표(분)</div>
+            <div className="mb-1 text-xs font-semibold text-slate-600">계획(분)</div>
             <input
               type="number"
               min={0}
@@ -141,7 +178,7 @@ function AllSubjectsDashboard({
                 onCreateTask({ subjectId, title, date: d, plannedSeconds: planned * 60 })
               }}
             >
-              + 일정 생성
+              + 일정 추가
             </Button>
           </div>
         </div>
@@ -166,7 +203,7 @@ function AllSubjectsDashboard({
               </Button>
             </div>
             <div className="grid grid-cols-2 gap-2 px-4 pb-4 md:grid-cols-4">
-              <Metric label="총 목표" value={formatHmsFromSeconds(s.totalPlanned)} />
+              <Metric label="총 계획" value={formatHmsFromSeconds(s.totalPlanned)} />
               <Metric label="총 실제" value={formatHmsFromSeconds(s.totalActual)} />
               <Metric
                 label="차이"
@@ -185,13 +222,13 @@ function AllSubjectsDashboard({
                   <div className="px-3 py-3 text-sm text-slate-500">일정이 없어요.</div>
                 ) : (
                   s.sortedTasks.slice(0, 5).map((t) => (
-                    <Link key={t.id} to={`/task/${t.id}`} className="block px-3 py-2 hover:bg-slate-50">
+                    <button key={t.id} type="button" onClick={() => onOpenTask(t.id)} className="block w-full px-3 py-2 text-left hover:bg-slate-50">
                       <div className="flex items-center justify-between gap-3">
                         <div className="min-w-0">
                           <div className="truncate text-sm font-medium text-slate-900">{t.title}</div>
                           <div className="mt-0.5 text-[11px] text-slate-500">
                             {t.date ? t.date : '미배치'}
-                            {t.actualStartTime || t.plannedStartTime ? ` · ${t.actualStartTime ?? t.plannedStartTime}` : ''} · 목표 {formatHmsFromSeconds(t.plannedSeconds)} ·{' '}
+                            {t.actualStartTime || t.plannedStartTime ? ` · ${t.actualStartTime ?? t.plannedStartTime}` : ''} · 계획 {formatHmsFromSeconds(t.plannedSeconds)} ·{' '}
                             {t.status === 'completed' ? '완료' : '미완료'}
                           </div>
                         </div>
@@ -201,7 +238,7 @@ function AllSubjectsDashboard({
                           </div>
                         ) : null}
                       </div>
-                    </Link>
+                    </button>
                   ))
                 )}
               </div>
@@ -220,6 +257,8 @@ function SingleSubjectDashboard({
   activeExamId,
   onNavigate,
   onCreateTask,
+  onOpenTask,
+  onManageSubjects,
 }: {
   subjectId: string
   subjects: { id: string; examId: string; name: string; color: string }[]
@@ -238,6 +277,8 @@ function SingleSubjectDashboard({
   activeExamId: string
   onNavigate: (path: string) => void
   onCreateTask: (input: { subjectId: string; title: string; date?: string; plannedSeconds: number }) => void
+  onOpenTask: (taskId: string) => void
+  onManageSubjects: () => void
 }) {
   const [tab, setTab] = useState<Tab>('all')
   const subject = subjects.find((x) => x.id === subjectId)
@@ -279,9 +320,9 @@ function SingleSubjectDashboard({
 
   return (
     <div className="flex flex-col gap-3">
-      <MobileTopBar title="대시보드" />
+      <MobileTopBar title="과목별" right={<Button variant="secondary" onClick={onManageSubjects}>과목관리</Button>} />
       <Card>
-        <CardHeader title="대시보드" />
+        <CardHeader title="과목별" />
         <div className="grid grid-cols-1 gap-3 px-4 py-3 md:grid-cols-[1fr_260px]">
           <div className="flex flex-col gap-2">
             <div className="grid grid-cols-1 gap-2 md:grid-cols-[1fr_200px]">
@@ -306,7 +347,7 @@ function SingleSubjectDashboard({
             </div>
 
             <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-              <Metric label="총 목표" value={formatHmsFromSeconds(stats.totalPlanned)} />
+              <Metric label="총 계획" value={formatHmsFromSeconds(stats.totalPlanned)} />
               <Metric label="총 실제" value={formatHmsFromSeconds(stats.totalActual)} />
               <Metric
                 label="차이"
@@ -365,14 +406,14 @@ function SingleSubjectDashboard({
           {filtered.map((t) => {
             const variance = (t.actualSeconds ?? 0) - t.plannedSeconds
             return (
-              <Link key={t.id} to={`/task/${t.id}`} className="block px-4 py-3 hover:bg-slate-50">
+              <button key={t.id} type="button" onClick={() => onOpenTask(t.id)} className="block w-full px-4 py-3 text-left hover:bg-slate-50">
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0">
                     <div className="truncate text-sm font-semibold text-slate-900">
                       {t.date} · {t.title}
                     </div>
                     <div className="mt-1 text-xs text-slate-500">
-                      목표 {formatHmsFromSeconds(t.plannedSeconds)}
+                      계획 {formatHmsFromSeconds(t.plannedSeconds)}
                       {t.actualSeconds !== undefined ? ` / 실제 ${formatHmsFromSeconds(t.actualSeconds)}` : ''} ·{' '}
                       {t.status === 'completed' ? '완료' : '미완료'}
                     </div>
@@ -384,7 +425,7 @@ function SingleSubjectDashboard({
                     </div>
                   ) : null}
                 </div>
-              </Link>
+              </button>
             )
           })}
         </div>

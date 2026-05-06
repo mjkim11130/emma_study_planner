@@ -4,7 +4,7 @@ import { CalendarView } from './routes/CalendarView'
 import { DayDetailView } from './routes/DayDetailView'
 import { SubjectDashboardView } from './routes/SubjectDashboardView'
 import { SubjectManagerView } from './routes/SubjectManagerView'
-import { TaskDetailView } from './routes/TaskDetailView'
+import { TaskDialogRedirectView } from './routes/TaskDialogRedirectView'
 import { SettingsView } from './routes/SettingsView'
 import { ExamDetailView } from './routes/ExamDetailView'
 import { LoginView } from './routes/LoginView'
@@ -25,7 +25,7 @@ function App() {
           <Route path="/calendar" element={<CalendarView />} />
           <Route path="/day" element={<Navigate to="/calendar" replace />} />
           <Route path="/day/:date" element={<DayDetailView />} />
-          <Route path="/task/:taskId" element={<TaskDetailView />} />
+          <Route path="/task/:taskId" element={<TaskDialogRedirectView />} />
           <Route path="/subjects" element={<SubjectManagerView />} />
           <Route path="/dashboard" element={<SubjectDashboardView />} />
           <Route path="/dashboard/:subjectId" element={<SubjectDashboardView />} />

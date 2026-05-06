@@ -20,11 +20,13 @@ export function MobileTopBar({
   left,
   center,
   right,
+  bottom,
 }: {
   title: string
   left?: ReactNode
   center?: ReactNode
   right?: ReactNode
+  bottom?: ReactNode
 }) {
   const sidebar = useContext(SidebarToggleContext)
 
@@ -51,6 +53,7 @@ export function MobileTopBar({
         </div>
         <div className="flex shrink-0 items-center justify-end">{right}</div>
       </div>
+      {bottom ? <div className="px-3 pb-2">{bottom}</div> : null}
     </div>
   )
 }

@@ -4,47 +4,44 @@ import {
   differenceInCalendarDays,
   endOfMonth,
   endOfWeek,
+  getDay,
+  isSameDay,
+  isSameMonth,
   format,
   parseISO,
+  startOfMonth,
   startOfWeek,
+  subMonths,
 } from 'date-fns'
 import { ko } from 'date-fns/locale'
-import { useContext, useEffect, useMemo, useRef, useState, type ReactNode, type WheelEvent as ReactWheelEvent } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+  type WheelEvent as ReactWheelEvent,
+} from 'react'
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { todayYmd } from '../lib/dates'
-import { formatRoundedDurationKoFromSeconds, formatRoundedDurationShortFromSeconds } from '../lib/time'
+import { formatDurationKoFromSeconds } from '../lib/time'
 import { Button } from '../components/ui'
+import { DurationPickerButton } from '../components/DurationPicker'
+import { TimePickerModal } from '../components/TimePicker'
 import { usePlannerStore } from '../store/usePlannerStore'
 import { MobileTopBar } from '../components/MobileTopBar'
-import { NewTaskSheetContext } from '../components/AppLayout'
-import { NewTaskSheet } from '../components/NewTaskSheet'
-import { TaskRecordSheet } from '../components/TaskRecordSheet'
+import { TaskTimerModal } from '../components/TaskTimerModal'
+import { TaskDialogShell } from '../components/TaskDialogShell'
+import type { StudyTask } from '../store/types'
+import { buildTimeSummaryNode, formatDurationPreciseKo } from '../lib/taskTimeSummary'
 
 function StartPendingBubbleIcon() {
   return (
     <svg viewBox="0 0 64 64" aria-hidden="true" className="h-8 w-8 text-slate-800">
-      <rect x="9" y="14" width="34" height="34" rx="7" fill="#e8f1fb" />
+      <rect x="10" y="10" width="44" height="44" rx="10" fill="#e8f1fb" />
       <path
-        d="M18 10v8M34 10v8M9 23h34M16 30h6M26 30h6M16 38h6M26 38h6"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="4"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <circle cx="43" cy="43" r="12" fill="#ffffff" />
-      <circle
-        cx="43"
-        cy="43"
-        r="12"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="4"
-        strokeLinecap="round"
-        strokeDasharray="1.5 6.5"
-      />
-      <path
-        d="M43 37v6h5"
+        d="M20 24h24M20 32h24M20 40h24"
         fill="none"
         stroke="currentColor"
         strokeWidth="4"
@@ -52,39 +49,6 @@ function StartPendingBubbleIcon() {
         strokeLinejoin="round"
       />
     </svg>
-  )
-}
-
-function FlagIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" className={className ?? 'h-4 w-4'}>
-      <path d="M6 3v18" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
-      <path
-        d="M6 4h11l-2 4 2 4H6"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2.2"
-        strokeLinejoin="round"
-        strokeLinecap="round"
-      />
-    </svg>
-  )
-}
-
-function GoalPillIcon({ className }: { className?: string }) {
-  return <span aria-hidden="true" className={`inline-block h-3.5 w-3.5 rounded-[4px] border-2 border-current ${className ?? ''}`} />
-}
-
-function RecordPillIcon({ className }: { className?: string }) {
-  return (
-    <span
-      aria-hidden="true"
-      className={`inline-flex h-3.5 w-3.5 items-center justify-center rounded-[4px] bg-white text-slate-900 ${className ?? ''}`}
-    >
-      <svg viewBox="0 0 24 24" className="h-3 w-3">
-        <path d="M20 6L9 17l-5-5" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    </span>
   )
 }
 
@@ -98,6 +62,18 @@ function formatMeridiemHm(hm?: string) {
   const meridiem = hours24 < 12 ? '오전' : '오후'
   const hours12 = hours24 % 12 === 0 ? 12 : hours24 % 12
   return `${meridiem} ${String(hours12).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`
+}
+
+function hmToMinutes(hm?: string | null) {
+  if (!hm) return null
+  const match = /^(\d{1,2}):(\d{2})$/.exec(hm)
+  if (!match) return null
+  const hours24 = Number(match[1])
+  const minutes = Number(match[2])
+  if (!Number.isFinite(hours24) || !Number.isFinite(minutes)) return null
+  if (hours24 < 0 || hours24 > 23) return null
+  if (minutes < 0 || minutes > 59) return null
+  return hours24 * 60 + minutes
 }
 
 function addSecondsToHm(hm: string, secondsToAdd: number) {
@@ -121,18 +97,15 @@ function formatDueDateLabel(ymd?: string) {
   return `${format(parseISO(ymd), 'M월 d일')}까지 마감`
 }
 
-function formatDurationPreciseKo(totalSeconds: number) {
-  const clamped = Math.max(0, Math.floor(totalSeconds))
-  if (clamped < 60) return '1분 이내'
-  const hours = Math.floor(clamped / 3600)
-  const minutes = Math.floor((clamped % 3600) / 60)
-  const parts: string[] = []
-  if (hours > 0) parts.push(`${hours}시간`)
-  if (minutes > 0) parts.push(`${minutes}분`)
-  if (parts.length === 0) {
-    parts.push('0분')
-  }
-  return `${parts.join(' ')}동안`
+function parseYmd(value: string) {
+  if (!value) return null
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null
+  const d = parseISO(value)
+  return Number.isNaN(d.getTime()) ? null : d
+}
+
+function toYmd(d: Date) {
+  return format(d, 'yyyy-MM-dd')
 }
 
 function formatDurationGraphKo(totalSeconds: number) {
@@ -147,40 +120,23 @@ function formatDurationGraphKo(totalSeconds: number) {
   return parts.join(' ')
 }
 
-function buildTimeSummaryNode({
-  start,
-  end,
-  durationSeconds,
-}: {
-  start?: string | null
-  end?: string | null
-  durationSeconds?: number | null
-}) {
-  // If the range collapses to the same minute (e.g. 11:41 ~ 11:41), show a single timestamp.
-  if (start && end && start === end) {
-    return <>{formatMeridiemHm(start)}</>
+function buildNextTaskTitle(baseTitle: string, tasks: StudyTask[]) {
+  const trimmedBase = baseTitle.trim()
+  if (!trimmedBase) return ''
+  const usedNumbers = new Set<number>()
+  for (const task of tasks) {
+    const title = task.title.trim()
+    if (title === trimmedBase) {
+      usedNumbers.add(1)
+      continue
+    }
+    const match = new RegExp(`^${trimmedBase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s+(\\d+)$`).exec(title)
+    if (!match) continue
+    usedNumbers.add(Number(match[1]))
   }
-  const rangeText = start ? (end ? `${formatMeridiemHm(start)}부터 ${formatMeridiemHm(end)}까지` : `${formatMeridiemHm(start)}부터`) : ''
-  const durationText = typeof durationSeconds === 'number' ? formatDurationPreciseKo(durationSeconds) : ''
-
-  if (rangeText && !end && !durationText) {
-    return (
-      <>
-        {rangeText} 시작
-      </>
-    )
-  }
-
-  if (rangeText && durationText) {
-    return (
-      <>
-        {rangeText} {end ? <strong>{durationText}</strong> : durationText}
-      </>
-    )
-  }
-
-  if (durationText) return durationText
-  return rangeText
+  let nextNumber = 1
+  while (usedNumbers.has(nextNumber)) nextNumber += 1
+  return `${trimmedBase} ${nextNumber}`
 }
 
 function CompareRail({
@@ -202,14 +158,14 @@ function CompareRail({
   return (
     <div className="flex flex-col gap-2.5 py-1">
       <div className="grid grid-cols-[46px_minmax(0,1fr)_98px] items-center gap-3">
-        <span className="text-sm font-semibold text-slate-400">목표</span>
+        <span className="text-sm font-semibold text-slate-400">계획</span>
         <div className="h-3.5 overflow-hidden">
           <div className="h-full rounded-full bg-slate-300" style={{ width: goalWidth }} />
         </div>
         <span className="text-right text-[15px] font-semibold tabular-nums text-slate-500">{goalLabel}</span>
       </div>
       <div className="grid grid-cols-[46px_minmax(0,1fr)_98px] items-center gap-3">
-        <span className="text-sm font-semibold text-slate-900">기록</span>
+        <span className="text-sm font-semibold text-slate-900">완료</span>
         <div className="h-3.5 overflow-hidden">
           <div className="h-full rounded-full bg-slate-900" style={{ width: actualWidth }} />
         </div>
@@ -221,20 +177,45 @@ function CompareRail({
 }
 
 export function CalendarView() {
+  const DRAFT_TASK_ID = '__draft_task__'
+  const location = useLocation()
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
-  const newTaskSheet = useContext(NewTaskSheetContext)
   const activeExamId = usePlannerStore((s) => s.activeExamId)
   const activeExam = usePlannerStore(useMemo(() => (s) => s.exams.find((e) => e.id === activeExamId), [activeExamId]))
   const subjects = usePlannerStore((s) => s.subjects)
   const tasks = usePlannerStore((s) => s.tasks)
+  const lastUsedSubjectIdByExam = usePlannerStore((s) => s.lastUsedSubjectIdByExam)
+  const addTask = usePlannerStore((s) => s.addTask)
   const updateTask = usePlannerStore((s) => s.updateTask)
+  const deleteTask = usePlannerStore((s) => s.deleteTask)
   const today = useMemo(() => parseISO(todayYmd()), [])
   const [startOpen, setStartOpen] = useState(false)
+  const [addDraft, setAddDraft] = useState<StudyTask | null>(null)
   const [editTaskId, setEditTaskId] = useState<string | null>(null)
-  const [recordTaskId, setRecordTaskId] = useState<string | null>(null)
+  const [timerTaskId, setTimerTaskId] = useState<string | null>(null)
+  const [datePickerField, setDatePickerField] = useState<null | 'date' | 'dueDate'>(null)
+  const [calendarMonth, setCalendarMonth] = useState(() => startOfMonth(new Date()))
+  const [timePickerOpen, setTimePickerOpen] = useState(false)
+  const [timePickerField, setTimePickerField] = useState<null | 'plannedStartTime' | 'actualStartTime' | 'actualEndTime'>(null)
+  const [plannedDurationPickerOpen, setPlannedDurationPickerOpen] = useState(false)
+  const [plannedSecondsDraft, setPlannedSecondsDraft] = useState(0)
+  const [editValidationMessage, setEditValidationMessage] = useState<string | null>(null)
+  const [editExitConfirmOpen, setEditExitConfirmOpen] = useState(false)
+  const [editTitleDraft, setEditTitleDraft] = useState('')
+  const [editTitleSample, setEditTitleSample] = useState('제목 추가')
+  const editTitleOriginalRef = useRef<{ taskId: string; title: string } | null>(null)
+  const subjectPickerRef = useRef<HTMLDivElement | null>(null)
+  const subjectPillRefs = useRef<Record<string, HTMLButtonElement | null>>({})
   const [startDock, setStartDock] = useState<{ v: 'top' | 'bottom'; h: 'right' }>({ v: 'bottom', h: 'right' })
   const topDockY = 64
+  const [, setSheetDragY] = useState(0)
+  const sheetDragRef = useRef<{ startY: number; isDragging: boolean }>({ startY: 0, isDragging: false })
+  const sheetDragYRef = useRef(0)
+  const [, setSheetIsDragging] = useState(false)
+  const [sheetClosing, setSheetClosing] = useState(false)
+  const [autoCloseAfterCompleteTaskId, setAutoCloseAfterCompleteTaskId] = useState<string | null>(null)
+  const [flashTaskId, setFlashTaskId] = useState<string | null>(null)
   const scrollAnimRef = useRef<number | null>(null)
   const dragRef = useRef<{
     isDragging: boolean
@@ -310,14 +291,28 @@ export function CalendarView() {
 
   const [displayMonth, setDisplayMonth] = useState(() => format(parseISO(todayYmd()), 'yyyy-MM'))
   const [dragOverDate, setDragOverDate] = useState<string | null>(null)
-  const monthWeeks = useMemo(() => {
-    const monthStart = parseISO(`${displayMonth}-01`)
+  const buildMonthWeeks = (month: string) => {
+    const monthStart = parseISO(`${month}-01`)
     const gridStart = startOfWeek(monthStart, { weekStartsOn: 0 })
     const gridEnd = endOfWeek(endOfMonth(monthStart), { weekStartsOn: 0 })
     const list: string[] = []
     for (let d = gridStart; d <= gridEnd; d = addDays(d, 7)) list.push(format(d, 'yyyy-MM-dd'))
     return list
-  }, [displayMonth])
+  }
+  const monthWeeks = useMemo(() => buildMonthWeeks(displayMonth), [displayMonth])
+  const prevMonth = useMemo(() => format(addMonths(parseISO(`${displayMonth}-01`), -1), 'yyyy-MM'), [displayMonth])
+  const nextMonth = useMemo(() => format(addMonths(parseISO(`${displayMonth}-01`), 1), 'yyyy-MM'), [displayMonth])
+  const prevMonthWeeks = useMemo(() => buildMonthWeeks(prevMonth), [prevMonth])
+  const nextMonthWeeks = useMemo(() => buildMonthWeeks(nextMonth), [nextMonth])
+
+  const [monthDragX, setMonthDragX] = useState(0)
+  const [isMonthDragging, setIsMonthDragging] = useState(false)
+  const monthSwipeRef = useRef<{ isDown: boolean; startX: number; startY: number; lastX: number }>({
+    isDown: false,
+    startX: 0,
+    startY: 0,
+    lastX: 0,
+  })
 
   const examCountdown = useMemo(() => {
     if (!activeExam?.examDate) return null
@@ -331,6 +326,12 @@ export function CalendarView() {
 
   const scopedTasks = useMemo(() => tasks.filter((t) => t.examId === activeExamId && t.date), [tasks, activeExamId])
   const previewTaskId = searchParams.get('previewTaskId')
+  const shouldOpenAdd = searchParams.get('add') === '1'
+  const addDateParam = searchParams.get('addDate') ?? ''
+  const shouldOpenAddFromNav = Boolean((location.state as { openTaskAdd?: boolean; addDate?: string } | null)?.openTaskAdd)
+  const addDateFromNav = ((location.state as { openTaskAdd?: boolean; addDate?: string } | null)?.addDate ?? '').trim()
+  const shouldAutoEdit = searchParams.get('edit') === '1'
+  const shouldAutoCloseAfterComplete = searchParams.get('autoClose') === '1'
   const unassignedBySubject = useMemo(() => {
     const items = tasks.filter((t) => t.examId === activeExamId && !t.date && t.status !== 'completed').slice()
     const bySubject = new Map<string, typeof items>()
@@ -359,18 +360,212 @@ export function CalendarView() {
     return map
   }, [scopedTasks])
 
-  const previewTask = useMemo(() => tasks.find((task) => task.id === previewTaskId) ?? null, [tasks, previewTaskId])
-  const editTask = useMemo(() => tasks.find((task) => task.id === editTaskId) ?? null, [tasks, editTaskId])
-  const openPreviewTask = (taskId: string) => {
+  const storedPreviewTask = useMemo(() => tasks.find((task) => task.id === previewTaskId) ?? null, [tasks, previewTaskId])
+  const isAddMode = addDraft?.id === DRAFT_TASK_ID
+  const [editDraft, setEditDraft] = useState<StudyTask | null>(null)
+  const basePreviewTask = addDraft ?? storedPreviewTask
+  const isEditingPreview = Boolean(basePreviewTask && editTaskId === basePreviewTask.id)
+  const previewTask = isAddMode ? addDraft : isEditingPreview ? editDraft ?? basePreviewTask : basePreviewTask
+  const scopedSubjects = useMemo(() => subjects.filter((s) => s.examId === activeExamId), [subjects, activeExamId])
+  const openPreviewTask = (taskId: string, opts?: { autoEdit?: boolean; autoCloseAfterComplete?: boolean }) => {
     const next = new URLSearchParams(searchParams)
     next.set('previewTaskId', taskId)
+    if (opts?.autoEdit) next.set('edit', '1')
+    else next.delete('edit')
+    if (opts?.autoCloseAfterComplete) next.set('autoClose', '1')
+    else next.delete('autoClose')
     setSearchParams(next, { replace: true })
   }
+
+  const openTaskAdd = (initial?: { date?: string }) => {
+    const fallbackSubjectId =
+      (lastUsedSubjectIdByExam[activeExamId] && subjects.some((s) => s.id === lastUsedSubjectIdByExam[activeExamId])
+        ? lastUsedSubjectIdByExam[activeExamId]
+        : null) ??
+      subjects.find((s) => s.examId === activeExamId)?.id ??
+      subjects[0]?.id ??
+      ''
+    if (!fallbackSubjectId) return
+    const now = new Date().toISOString()
+    const draft: StudyTask = {
+      id: DRAFT_TASK_ID,
+      examId: activeExamId,
+      subjectId: fallbackSubjectId,
+      title: '',
+      date: initial?.date ?? '',
+      plannedSeconds: 0,
+      status: 'pending',
+      createdAt: now,
+      updatedAt: now,
+    }
+    setAddDraft(draft)
+    openPreviewTask(DRAFT_TASK_ID, { autoEdit: true })
+    setEditTaskId(DRAFT_TASK_ID)
+    setAutoCloseAfterCompleteTaskId(null)
+  }
+
+  const patchPreviewTask = (patch: Partial<Omit<StudyTask, 'id' | 'createdAt'>>) => {
+    if (!previewTask) return
+    if (isAddMode) {
+      setAddDraft((current) => (current ? { ...current, ...patch, updatedAt: new Date().toISOString() } : current))
+      return
+    }
+    if (isEditingPreview) {
+      setEditDraft((current) => {
+        const base = current ?? storedPreviewTask
+        return base ? { ...base, ...patch, updatedAt: new Date().toISOString() } : current
+      })
+      return
+    }
+    // Safety: never apply edits to the store unless user explicitly commits via "완료".
+    // (Prevents "편집 취소" being ineffective due to live updates.)
+    return
+  }
+
+  const commitEditDraft = (original: StudyTask, draft: StudyTask) => {
+    const patch: Partial<Omit<StudyTask, 'id' | 'createdAt'>> = {}
+    const keys: Array<keyof Omit<StudyTask, 'id' | 'createdAt'>> = [
+      'examId',
+      'subjectId',
+      'title',
+      'date',
+      'dueDate',
+      'plannedStartTime',
+      'plannedSeconds',
+      'actualStartTime',
+      'actualEndTime',
+      'actualSeconds',
+      'recordCompleteOnly',
+      'status',
+      'updatedAt',
+    ]
+    for (const key of keys) {
+      if (draft[key] !== original[key]) patch[key] = draft[key] as never
+    }
+    if (Object.keys(patch).length === 0) return
+    updateTask(original.id, patch)
+  }
+
+  const commitAddDraft = (draft: StudyTask) => {
+    const id = addTask({
+      examId: draft.examId,
+      subjectId: draft.subjectId,
+      title: draft.title,
+      date: draft.date,
+      dueDate: draft.dueDate,
+      plannedStartTime: draft.plannedStartTime,
+      plannedSeconds: draft.plannedSeconds,
+      actualStartTime: draft.actualStartTime,
+      actualEndTime: draft.actualEndTime,
+      actualSeconds: draft.actualSeconds,
+      recordCompleteOnly: draft.recordCompleteOnly,
+    })
+    setFlashTaskId(id)
+    window.setTimeout(() => {
+      setFlashTaskId((cur) => (cur === id ? null : cur))
+    }, 1200)
+    return id
+  }
+
   const closePreviewTask = () => {
     const next = new URLSearchParams(searchParams)
     next.delete('previewTaskId')
+    next.delete('add')
+    next.delete('addDate')
+    next.delete('edit')
+    next.delete('autoClose')
     setSearchParams(next, { replace: true })
+    setAddDraft(null)
+    setEditDraft(null)
+    setEditTaskId(null)
+    setAutoCloseAfterCompleteTaskId(null)
   }
+
+  const animateClosePreview = (opts?: { cancelAutoAdd?: boolean }) => {
+    if (sheetClosing) return
+    if (opts?.cancelAutoAdd && !isAddMode && previewTask && autoCloseAfterCompleteTaskId === previewTask.id) {
+      deleteTask(previewTask.id)
+      setAutoCloseAfterCompleteTaskId(null)
+    }
+    setSheetClosing(true)
+    closePreviewTask()
+    setSheetClosing(false)
+  }
+
+  useEffect(() => {
+    if (!shouldOpenAddFromNav) return
+    if (addDraft || storedPreviewTask) return
+    openTaskAdd({ date: addDateFromNav || undefined })
+    navigate({ pathname: location.pathname, search: location.search }, { replace: true, state: null })
+  }, [shouldOpenAddFromNav, addDateFromNav, addDraft, storedPreviewTask, navigate, location.pathname, location.search])
+
+  useEffect(() => {
+    if (!shouldOpenAdd) return
+    if (addDraft || storedPreviewTask) return
+    openTaskAdd({ date: addDateParam || undefined })
+  }, [shouldOpenAdd, addDateParam, addDraft, storedPreviewTask])
+
+  useEffect(() => {
+    if (!previewTask || isAddMode) return
+    if (sheetClosing) return
+    setEditDraft(null)
+    if (shouldAutoEdit) setEditTaskId(previewTask.id)
+    else setEditTaskId(null)
+    if (shouldAutoCloseAfterComplete) setAutoCloseAfterCompleteTaskId(previewTask.id)
+    else setAutoCloseAfterCompleteTaskId(null)
+  }, [previewTask?.id, isAddMode, sheetClosing, shouldAutoEdit, shouldAutoCloseAfterComplete])
+
+  useEffect(() => {
+    if (isAddMode) return
+    if (!storedPreviewTask) return
+    if (editTaskId !== storedPreviewTask.id) return
+    setEditDraft({ ...storedPreviewTask })
+  }, [editTaskId, storedPreviewTask?.id, isAddMode])
+
+  useLayoutEffect(() => {
+    if (!previewTask) return
+    if (editTaskId !== previewTask.id) return
+    if (!previewTask.subjectId) return
+    const el = subjectPillRefs.current[previewTask.subjectId]
+    if (!el) return
+    el.scrollIntoView({ behavior: 'instant' as ScrollBehavior, block: 'nearest', inline: 'center' })
+  }, [previewTask?.id, previewTask?.subjectId, editTaskId])
+
+  const openCalendarFor = (field: 'date' | 'dueDate') => {
+    if (!previewTask) return
+    setDatePickerField(field)
+    const current = parseYmd(field === 'date' ? previewTask.date : (previewTask.dueDate ?? ''))
+    setCalendarMonth(startOfMonth(current ?? new Date()))
+  }
+
+  const pickCalendarDay = (d: Date) => {
+    if (!previewTask) return
+    const ymd = toYmd(d)
+    if (datePickerField === 'date') patchPreviewTask({ date: ymd })
+    if (datePickerField === 'dueDate') patchPreviewTask({ dueDate: ymd })
+    setDatePickerField(null)
+  }
+
+  useEffect(() => {
+    if (!previewTask) return
+    if (editTaskId !== previewTask.id) return
+    setPlannedSecondsDraft(Math.max(0, previewTask.plannedSeconds ?? 0))
+  }, [previewTask?.id, previewTask?.subjectId, editTaskId, subjects])
+
+  useEffect(() => {
+    if (!previewTask) return
+    if (editTaskId !== previewTask.id) return
+    const currentTitle = previewTask.title ?? ''
+    setEditTitleDraft(currentTitle)
+    editTitleOriginalRef.current = { taskId: previewTask.id, title: currentTitle }
+    const sample = isAddMode
+      ? '제목 추가'
+      : currentTitle.trim()
+        ? currentTitle
+        : (subjects.find((s) => s.id === previewTask.subjectId)?.name ?? '제목 추가')
+    setEditTitleSample(sample || '제목 추가')
+  }, [isAddMode, previewTask?.id, editTaskId, previewTask?.subjectId, subjects])
+
   const previewSubject = useMemo(
     () => subjects.find((subject) => subject.id === previewTask?.subjectId) ?? null,
     [subjects, previewTask?.subjectId],
@@ -382,102 +577,114 @@ export function CalendarView() {
   const previewActualSummary = useMemo(() => {
     if (!previewTask) return null
     if (typeof previewTask.actualSeconds !== 'number') return null
-    if (previewTask.plannedSeconds > 0) {
-      const variance = previewTask.actualSeconds - previewTask.plannedSeconds
-      if (variance < 0) {
-        return {
-          kind: 'compare' as const,
-          goalLabel: formatDurationGraphKo(previewTask.plannedSeconds),
-          actualLabel: formatDurationGraphKo(previewTask.actualSeconds),
-          goalSeconds: previewTask.plannedSeconds,
-          actualSeconds: previewTask.actualSeconds,
-          deltaLabel: `${formatDurationGraphKo(Math.abs(variance))} 일찍 완료`,
-        }
-      }
-      if (variance > 0) {
-        return {
-          kind: 'compare' as const,
-          goalLabel: formatDurationGraphKo(previewTask.plannedSeconds),
-          actualLabel: formatDurationGraphKo(previewTask.actualSeconds),
-          goalSeconds: previewTask.plannedSeconds,
-          actualSeconds: previewTask.actualSeconds,
-          deltaLabel: `${formatDurationGraphKo(Math.abs(variance))} 오래 지속`,
-        }
-      }
+    if (previewTask.actualSeconds < 60) return null
+    // 계획 소요시간이 없으면(시작시간만 있는 케이스 포함) 비교 그래프를 띄우지 않음.
+    if (!(previewTask.plannedSeconds > 0)) return null
+
+    const variance = previewTask.actualSeconds - previewTask.plannedSeconds
+    if (variance < 0) {
       return {
         kind: 'compare' as const,
         goalLabel: formatDurationGraphKo(previewTask.plannedSeconds),
         actualLabel: formatDurationGraphKo(previewTask.actualSeconds),
         goalSeconds: previewTask.plannedSeconds,
         actualSeconds: previewTask.actualSeconds,
-        deltaLabel: '딱 맞게 완료',
+        deltaLabel: `${formatDurationGraphKo(Math.abs(variance))} 일찍 완료`,
       }
     }
-    return null
+    if (variance > 0) {
+      return {
+        kind: 'compare' as const,
+        goalLabel: formatDurationGraphKo(previewTask.plannedSeconds),
+        actualLabel: formatDurationGraphKo(previewTask.actualSeconds),
+        goalSeconds: previewTask.plannedSeconds,
+        actualSeconds: previewTask.actualSeconds,
+        deltaLabel: `${formatDurationGraphKo(Math.abs(variance))} 오래 지속`,
+      }
+    }
+    return {
+      kind: 'compare' as const,
+      goalLabel: formatDurationGraphKo(previewTask.plannedSeconds),
+      actualLabel: formatDurationGraphKo(previewTask.actualSeconds),
+      goalSeconds: previewTask.plannedSeconds,
+      actualSeconds: previewTask.actualSeconds,
+      deltaLabel: '딱 맞게 완료',
+    }
   }, [previewTask])
   const previewHeadlineTimes = useMemo(() => {
     if (!previewTask) return []
-    const hasCompare = typeof previewTask.actualSeconds === 'number' && previewTask.plannedSeconds > 0
-    const items: Array<{ kind: '목표' | '기록'; badge: string; text: ReactNode; key: string }> = []
+    const showGraph = Boolean(previewActualSummary)
+    const items: Array<{ kind: '계획' | '완료'; badge: string; text: ReactNode; key: string }> = []
+    const buildNode = (input: { start?: string | null; end?: string | null; durationSeconds?: number | null }) =>
+      buildTimeSummaryNode({ ...input, formatHm: (hm) => formatMeridiemHm(hm) })
 
-    // Only show "목표" if we have a concrete start time to display.
-    if (previewTask.plannedStartTime) {
-      const plannedText = hasCompare
-        ? buildTimeSummaryNode({ start: previewTask.plannedStartTime, end: previewPlannedEnd, durationSeconds: null })
-        : buildTimeSummaryNode({
-            start: previewTask.plannedStartTime,
-            end: previewPlannedEnd,
-            durationSeconds: previewTask.plannedSeconds > 0 ? previewTask.plannedSeconds : null,
-          })
+    // Show "계획" when we have either start time or duration.
+    if (previewTask.plannedStartTime || previewTask.plannedSeconds > 0) {
+      const plannedText = previewTask.plannedStartTime
+        ? showGraph
+          ? buildNode({ start: previewTask.plannedStartTime, end: previewPlannedEnd, durationSeconds: null })
+          : buildNode({
+              start: previewTask.plannedStartTime,
+              end: previewPlannedEnd,
+              durationSeconds: previewTask.plannedSeconds > 0 ? previewTask.plannedSeconds : null,
+            })
+        : previewTask.plannedSeconds > 0
+          ? (showGraph ? null : formatDurationPreciseKo(previewTask.plannedSeconds))
+          : null
+      if (plannedText) {
       items.push({
-        kind: '목표',
-        badge: '목표',
+        kind: '계획',
+        badge: '계획',
         text: plannedText,
         key: 'goal',
       })
+      }
     }
 
     if (previewTask.actualStartTime || typeof previewTask.actualSeconds === 'number') {
-      const actualText = hasCompare
-        ? buildTimeSummaryNode({ start: previewTask.actualStartTime, end: previewTask.actualEndTime, durationSeconds: null })
-        : buildTimeSummaryNode({
+      const actualText = showGraph
+        ? buildNode({ start: previewTask.actualStartTime, end: previewTask.actualEndTime, durationSeconds: null })
+        : buildNode({
             start: previewTask.actualStartTime,
             end: previewTask.actualEndTime,
             durationSeconds: typeof previewTask.actualSeconds === 'number' ? previewTask.actualSeconds : null,
           })
       items.push({
-        kind: '기록',
-        badge: '기록',
+        kind: '완료',
+        badge: '완료',
         text: actualText,
         key: 'actual',
       })
     }
 
-    if (!items.some((item) => item.kind === '기록') && previewTask.status === 'completed') {
+    if (!items.some((item) => item.kind === '완료') && previewTask.status === 'completed') {
       items.push({
-        kind: '기록',
-        badge: '기록',
+        kind: '완료',
+        badge: '완료',
         text: '완료 처리',
         key: 'completed',
       })
     }
 
     return items
-  }, [previewPlannedEnd, previewTask])
-  const hasPreviewMeta = Boolean(previewHeadlineTimes.length || previewTask?.dueDate)
+  }, [previewActualSummary, previewPlannedEnd, previewTask])
+  const hasPreviewMeta = Boolean(isEditingPreview || previewHeadlineTimes.length || previewTask?.dueDate)
   const hasPreviewCompare = Boolean(previewActualSummary)
 
   // 일정 추가는 캘린더에서 하지 않고, 대시보드/과목 디테일에서 생성 후 날짜 배치하도록 유도
 
   const examMetaLabel = useMemo(() => {
     if (!activeExam) return null
-    const name = activeExam.name?.trim()
-    const pieces: string[] = []
-    if (name) pieces.push(name)
-    if (examCountdown?.examDate) pieces.push(`시험일 ${examCountdown.examDate}`)
-    if (examCountdown?.dday) pieces.push(examCountdown.dday)
-    return pieces.length ? pieces.join(' · ') : null
+    if (!examCountdown) return activeExam.name?.trim() || null
+    const name = activeExam.name?.trim() || '시험'
+    const weeksLeft = typeof examCountdown.weeksLeft === 'number' ? examCountdown.weeksLeft : null
+    const weekLabel = weeksLeft !== null ? `${name} ${weeksLeft}주 전` : name
+    return `${weekLabel} · ${examCountdown.dday}`
   }, [activeExam, examCountdown])
+
+  const displayMonthLabel = useMemo(() => format(parseISO(`${displayMonth}-01`), 'yyyy년 M월'), [displayMonth])
+  const prevMonthLabel = useMemo(() => format(parseISO(`${prevMonth}-01`), 'M월'), [prevMonth])
+  const nextMonthLabel = useMemo(() => format(parseISO(`${nextMonth}-01`), 'M월'), [nextMonth])
 
   useEffect(() => {
     try {
@@ -543,6 +750,297 @@ export function CalendarView() {
     }
   }
 
+  const monthGridRef = useRef<HTMLDivElement | null>(null)
+  const [monthGridHeight, setMonthGridHeight] = useState(0)
+  const monthProbeCellRef = useRef<HTMLDivElement | null>(null)
+  const monthProbeTasksRef = useRef<HTMLDivElement | null>(null)
+  const monthProbeTaskRowRef = useRef<HTMLButtonElement | null>(null)
+  const monthProbeMoreRowRef = useRef<HTMLDivElement | null>(null)
+  const [monthCellMaxTasks, setMonthCellMaxTasks] = useState(4)
+
+  useLayoutEffect(() => {
+    const el = monthGridRef.current
+    if (!el) return
+
+    const update = () => setMonthGridHeight(el.getBoundingClientRect().height)
+    update()
+
+    const ro = new ResizeObserver(() => update())
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [displayMonth])
+
+  useLayoutEffect(() => {
+    const cellEl = monthProbeCellRef.current
+    const tasksEl = monthProbeTasksRef.current
+    const taskRowEl = monthProbeTaskRowRef.current
+    const moreRowEl = monthProbeMoreRowRef.current
+
+    if (!cellEl || !tasksEl || !taskRowEl || !moreRowEl) return
+
+    const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n))
+    const calc = () => {
+      const tasksH = tasksEl.getBoundingClientRect().height
+      const taskRowH = taskRowEl.getBoundingClientRect().height
+      const moreRowH = moreRowEl.getBoundingClientRect().height
+
+      if (!Number.isFinite(tasksH) || !Number.isFinite(taskRowH) || tasksH <= 0 || taskRowH <= 0) {
+        setMonthCellMaxTasks(4)
+        return
+      }
+
+      // Allow a tiny epsilon to reduce off-by-1 due to subpixel rounding.
+      const epsilon = 0.75
+      const maxLines = Math.floor((tasksH + epsilon) / taskRowH)
+
+      // If the "+N" row is taller than a task row (can happen on some fonts), reserve by its height.
+      // We still reserve only one line visually, but this avoids choosing a count that makes "+N" clip.
+      const needsMoreReserve = moreRowH > taskRowH + 0.5
+      const adjusted = needsMoreReserve ? Math.max(0, maxLines - 1) : maxLines
+
+      setMonthCellMaxTasks(clamp(adjusted, 0, 6))
+    }
+
+    calc()
+    const ro = new ResizeObserver(() => calc())
+    ro.observe(cellEl)
+    ro.observe(tasksEl)
+    ro.observe(taskRowEl)
+    ro.observe(moreRowEl)
+    return () => ro.disconnect()
+  }, [displayMonth, monthWeeks.length, monthGridHeight])
+
+  const onMonthGridPointerDown = (e: React.PointerEvent) => {
+    if (e.pointerType !== 'touch') return
+    const target = e.target as HTMLElement | null
+    // Avoid interfering with tapping tasks (buttons) inside a day cell.
+    if (target?.closest('button')) return
+    // Avoid interfering with tapping the day cell itself (single tap should navigate).
+    if (target?.closest('[data-month-day-cell="true"]')) return
+    monthSwipeRef.current.isDown = true
+    monthSwipeRef.current.startX = e.clientX
+    monthSwipeRef.current.startY = e.clientY
+    monthSwipeRef.current.lastX = e.clientX
+    setIsMonthDragging(true)
+    setMonthDragX(0)
+  }
+
+  const onMonthGridPointerMove = (e: React.PointerEvent) => {
+    if (e.pointerType !== 'touch') return
+    if (!monthSwipeRef.current.isDown) return
+    const dx = e.clientX - monthSwipeRef.current.startX
+    const dy = e.clientY - monthSwipeRef.current.startY
+    // only start horizontal drag if it's clearly horizontal
+    if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return
+    if (Math.abs(dy) > Math.abs(dx) * 0.9) return
+    monthSwipeRef.current.lastX = e.clientX
+    setMonthDragX(dx)
+  }
+
+  const onMonthGridPointerUp = (e: React.PointerEvent) => {
+    if (e.pointerType !== 'touch') return
+    if (!monthSwipeRef.current.isDown) return
+    monthSwipeRef.current.isDown = false
+    setIsMonthDragging(false)
+
+    const dx = e.clientX - monthSwipeRef.current.startX
+    const dy = e.clientY - monthSwipeRef.current.startY
+    const threshold = 62
+    if (Math.abs(dx) < threshold || Math.abs(dy) > 28) {
+      setMonthDragX(0)
+      return
+    }
+
+    if (dx < 0) {
+      setMonthDragX(0)
+      setDisplayMonth(nextMonth)
+      return
+    }
+
+    setMonthDragX(0)
+    setDisplayMonth(prevMonth)
+  }
+
+  useEffect(() => {
+    // reset drag offset when month changes
+    setMonthDragX(0)
+    setIsMonthDragging(false)
+    monthSwipeRef.current.isDown = false
+  }, [displayMonth])
+
+  const renderMonthGrid = (weeks: string[], month: string) => {
+    return (
+      <div
+        className="grid h-full min-h-0"
+        style={{
+          gridTemplateColumns: 'repeat(7, minmax(0, 1fr))',
+          gridTemplateRows: `repeat(${Math.max(1, weeks.length)}, minmax(0, 1fr))`,
+        }}
+      >
+        {weeks
+          .flatMap((weekStart) => {
+            const weekStartDate = parseISO(weekStart)
+            return Array.from({ length: 7 }, (_, i) => format(addDays(weekStartDate, i), 'yyyy-MM-dd'))
+          })
+          .map((ymd, idx) => {
+            const dayMonth = ymd.slice(0, 7)
+            const isCurrentMonth = dayMonth === month
+            const isToday = ymd === todayYmd()
+            const dayNum = Number(ymd.slice(8, 10))
+            const cellTasks = (tasksByDate.get(ymd) ?? [])
+              .slice()
+              .sort((a, b) => {
+                const aStart = hmToMinutes(a.actualStartTime ?? a.plannedStartTime ?? null)
+                const bStart = hmToMinutes(b.actualStartTime ?? b.plannedStartTime ?? null)
+
+                if (aStart === null && bStart !== null) return 1
+                if (aStart !== null && bStart === null) return -1
+                if (aStart !== null && bStart !== null && aStart !== bStart) return aStart - bStart
+                return a.createdAt.localeCompare(b.createdAt)
+              })
+            const isProbe = idx === 0
+            const maxLines = monthCellMaxTasks
+            // If we need a "+N" line, reserve exactly 1 line for it.
+            const visibleCount = cellTasks.length > maxLines ? Math.max(0, maxLines - 1) : maxLines
+            const visible = cellTasks.slice(0, visibleCount)
+            const more = cellTasks.length - visible.length
+
+            return (
+              <div
+                key={`${month}-${ymd}`}
+                data-month-day-cell="true"
+                role="button"
+                tabIndex={0}
+                onClick={() => navigate(`/day/${ymd}`)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') navigate(`/day/${ymd}`)
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault()
+                  setDragOverDate(ymd)
+                }}
+                onDragLeave={() => {
+                  setDragOverDate((cur) => (cur === ymd ? null : cur))
+                }}
+                onDrop={(e) => {
+                  e.preventDefault()
+                  const taskId = e.dataTransfer.getData('text/emma-task-id')
+                  if (taskId) updateTask(taskId, { date: ymd })
+                  setDragOverDate(null)
+                }}
+                className={`relative flex min-h-0 cursor-pointer flex-col overflow-hidden border-b border-r border-slate-100 p-1.5 md:p-2 ${
+                  isCurrentMonth ? 'bg-white' : 'bg-slate-50'
+                }`}
+                ref={isProbe ? monthProbeCellRef : undefined}
+              >
+                {isToday ? <div className="pointer-events-none absolute inset-0 z-0 rounded-[2px] border-2 border-slate-300" /> : null}
+                {dragOverDate === ymd ? (
+                  <div className="pointer-events-none absolute inset-0 z-0 rounded-[2px] border-2 border-slate-400" />
+                ) : null}
+                <div className="relative z-10 flex w-full shrink-0 items-center justify-between gap-1">
+                  <div className={`text-xs font-semibold ${isCurrentMonth ? 'text-slate-900' : 'text-slate-400'}`}>{dayNum}</div>
+                </div>
+                <div
+                  className="relative z-10 -mx-1.5 mt-1 flex min-h-0 flex-1 flex-col overflow-hidden divide-y divide-slate-200 md:-mx-2"
+                  ref={isProbe ? monthProbeTasksRef : undefined}
+                >
+                  {visible.map((t) => {
+                    const subject = subjects.find((s) => s.id === t.subjectId)
+                    const bg = subject?.color ?? '#94a3b8'
+                    const textColor = pickReadableTextColor(bg)
+                    const dday = formatDday(t.dueDate)
+                    const hasActual = typeof t.actualSeconds === 'number' && Number.isFinite(t.actualSeconds)
+                    const hasAnyRecord = Boolean(t.actualStartTime || t.actualEndTime || hasActual)
+                    const isCompleted = t.status === 'completed' || hasAnyRecord
+                    const secondsToShow = hasActual ? (t.actualSeconds as number) : t.plannedSeconds
+                    const timeLabelKo = formatDurationKoFromSeconds(secondsToShow)
+                    const desktopTagText = isCompleted ? '✓' : dday ? dday : t.plannedSeconds > 0 ? timeLabelKo : null
+                    const mobileMaxUnits = 14
+                    const desktopMaxUnits = 22
+                    const titleMaxUnitsMobile = mobileMaxUnits
+                    const titleMaxUnitsDesktop = desktopMaxUnits - measureUnits(desktopTagText ?? '') - 1
+                    const titleMobile = truncateToUnits(t.title, titleMaxUnitsMobile)
+                    const titleDesktop = truncateToUnits(t.title, titleMaxUnitsDesktop)
+
+                    return (
+                      <button
+                        key={t.id}
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          openPreviewTask(t.id)
+                        }}
+                        draggable
+                        onDragStart={(e) => {
+                          e.dataTransfer.setData('text/emma-task-id', t.id)
+                          e.dataTransfer.effectAllowed = 'move'
+                        }}
+                        onDragEnd={() => setDragOverDate(null)}
+                        className={`box-border block w-full select-none rounded-[3px] py-0.5 pl-1.5 pr-0 text-left text-[10px] leading-none active:cursor-grabbing md:py-1 md:pl-2 ${
+	                          flashTaskId === t.id ? 'emma-flash-3' : ''
+	                        }`}
+                        data-completed={isCompleted ? 'true' : 'false'}
+                        style={{ background: bg, color: textColor, filter: isCompleted ? 'saturate(0.85) brightness(0.97)' : undefined }}
+                      >
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="min-w-0 overflow-hidden whitespace-nowrap">
+                            <span className="md:hidden">{titleMobile}</span>
+                            <span className="hidden md:inline">{titleDesktop}</span>
+                          </span>
+                          {isCompleted ? (
+                            <span className="shrink-0 tabular-nums text-[9px] font-semibold leading-none tracking-tighter md:hidden">
+                              <span className="bg-white/60 px-1 py-[1px] text-slate-900">✓</span>
+                            </span>
+                          ) : null}
+                          {desktopTagText ? (
+                            <span className="hidden shrink-0 tabular-nums text-[9px] font-semibold leading-none tracking-tighter md:inline">
+                              <span
+                                className={`bg-white/60 px-1 py-[1px] ${
+                                  isCompleted ? 'text-slate-900' : dday ? 'text-indigo-700' : 'text-slate-700'
+                                }`}
+                              >
+                                {desktopTagText}
+                              </span>
+                            </span>
+                          ) : null}
+                        </div>
+                      </button>
+                    )
+                  })}
+                  {more > 0 ? (
+                    <div className="px-0.5 text-[11px] leading-tight text-slate-400">+{more}</div>
+                  ) : null}
+                  {isProbe ? (
+                    <div className="pointer-events-none absolute left-0 top-0 opacity-0" aria-hidden="true">
+                      <button
+                        ref={monthProbeTaskRowRef}
+                        type="button"
+                        tabIndex={-1}
+                        className="box-border block w-full select-none rounded-[3px] py-0.5 pl-1.5 pr-0 text-left text-[10px] leading-none md:py-1 md:pl-2"
+                      >
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="min-w-0 overflow-hidden whitespace-nowrap">
+                            <span className="md:hidden">수학 18</span>
+                            <span className="hidden md:inline">수학 18</span>
+                          </span>
+                          <span className="hidden shrink-0 tabular-nums text-[9px] font-semibold leading-none tracking-tighter md:inline">
+                            <span className="bg-white/60 px-1 py-[1px] text-slate-700">10분</span>
+                          </span>
+                        </div>
+                      </button>
+                      <div ref={monthProbeMoreRowRef} className="px-0.5 text-[11px] leading-tight text-slate-400">
+                        +2
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            )
+          })}
+      </div>
+    )
+  }
+
   return (
     <div className="flex h-[calc(100dvh-72px-env(safe-area-inset-bottom))] flex-col overflow-hidden">
       <MobileTopBar
@@ -551,52 +1049,47 @@ export function CalendarView() {
           <Button
             variant="secondary"
             onClick={() => {
-              const prevMonth = format(addMonths(parseISO(`${displayMonth}-01`), -1), 'yyyy-MM')
               setDisplayMonth(prevMonth)
             }}
           >
-            이전
+            {prevMonthLabel}
           </Button>
         }
         center={
-          <div className="flex flex-col items-center justify-center gap-0.5">
+          <button
+            type="button"
+            onClick={() => {
+              const now = format(new Date(), 'yyyy-MM')
+              setDisplayMonth(now)
+            }}
+            className="flex w-full flex-col items-center justify-center gap-0.5 rounded-xl py-1.5 text-center hover:bg-slate-50"
+            aria-label="이번달로 이동"
+          >
             <div className="flex items-center justify-center gap-2">
-              <div className="text-sm font-semibold text-slate-900">{displayMonth}</div>
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  const now = format(new Date(), 'yyyy-MM')
-                  setDisplayMonth(now)
-                }}
-              >
-                이번달
-              </Button>
+              <div className="text-sm font-semibold text-slate-900">{displayMonthLabel}</div>
             </div>
             {examMetaLabel ? <div className="text-[11px] text-slate-600">{examMetaLabel}</div> : null}
-          </div>
+          </button>
         }
         right={
           <Button
             variant="secondary"
             onClick={() => {
-              const nextMonth = format(addMonths(parseISO(`${displayMonth}-01`), 1), 'yyyy-MM')
               setDisplayMonth(nextMonth)
             }}
           >
-            다음
+            {nextMonthLabel}
           </Button>
         }
       />
 
       <div
-        className="mt-2 flex-1 overflow-y-auto md:mt-3"
+        className="mt-2 flex min-h-0 flex-1 flex-col overflow-hidden md:mt-3"
         style={{
-          WebkitOverflowScrolling: 'touch',
           overscrollBehaviorY: 'contain',
         }}
       >
-        {/* Sticky weekday header */}
-        <div className="sticky top-0 z-20 grid grid-cols-7 border-b border-slate-100 bg-slate-50 text-xs font-medium text-slate-600">
+        <div className="grid grid-cols-7 border-b border-slate-100 bg-slate-50 text-xs font-medium text-slate-600">
           {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d) => (
             <div key={d} className="px-1 py-2 md:px-2">
               {d}
@@ -604,260 +1097,509 @@ export function CalendarView() {
           ))}
         </div>
 
-        {monthWeeks.map((weekStart) => {
-          const weekStartDate = parseISO(weekStart)
-          const days = Array.from({ length: 7 }, (_, i) => format(addDays(weekStartDate, i), 'yyyy-MM-dd'))
-          return (
+        <div
+          ref={monthGridRef}
+          onPointerDown={onMonthGridPointerDown}
+          onPointerMove={onMonthGridPointerMove}
+          onPointerUp={onMonthGridPointerUp}
+          onPointerCancel={() => {
+            monthSwipeRef.current.isDown = false
+            setIsMonthDragging(false)
+            setMonthDragX(0)
+          }}
+          className="relative min-h-0 flex-1 overflow-hidden px-3"
+          style={{ touchAction: 'none' }}
+        >
+          <div
+            className="absolute inset-0"
+            style={{
+              opacity: isMonthDragging ? 1 : 0,
+              transition: isMonthDragging ? 'none' : 'opacity 120ms ease-out',
+            }}
+            aria-hidden="true"
+          >
             <div
-              key={weekStart}
-              className="grid grid-cols-7 scroll-mt-10"
+              className="absolute inset-0 overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-[0_1px_0_rgba(15,23,42,0.02)]"
+              style={{ transform: `translate3d(calc(-100% + ${monthDragX}px), 0, 0)` }}
             >
-              {days.map((ymd) => {
-                    const dayMonth = ymd.slice(0, 7)
-                    const isCurrentMonth = dayMonth === displayMonth
-                    const isToday = ymd === todayYmd()
-                    const dayNum = Number(ymd.slice(8, 10))
-                    const monthNum = Number(ymd.slice(5, 7))
-                    const cellTasks = (tasksByDate.get(ymd) ?? [])
-                      .slice()
-                      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
-                    const visible = cellTasks.slice(0, 4)
-                    const more = cellTasks.length - visible.length
-
-                    return (
-                      <div
-                        key={ymd}
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => navigate(`/day/${ymd}`)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ' ') navigate(`/day/${ymd}`)
-                        }}
-                        onDragOver={(e) => {
-                          e.preventDefault()
-                          setDragOverDate(ymd)
-                        }}
-                        onDragLeave={() => {
-                          setDragOverDate((cur) => (cur === ymd ? null : cur))
-                        }}
-                        onDrop={(e) => {
-                          e.preventDefault()
-                          const taskId = e.dataTransfer.getData('text/emma-task-id')
-                          if (taskId) updateTask(taskId, { date: ymd })
-                          setDragOverDate(null)
-                        }}
-                        className={`h-[132px] cursor-pointer overflow-visible border-b border-r border-slate-100 p-1.5 md:h-[148px] md:p-2 ${
-                          isCurrentMonth ? 'bg-white' : 'bg-slate-50'
-                        } ${isToday ? 'relative z-10 outline outline-2 outline-slate-300 outline-offset-[-2px]' : ''} ${
-                          dragOverDate === ymd ? 'outline outline-2 outline-slate-400' : ''
-                        }`}
-                        aria-label={`${ymd} 일간 기록 보기`}
-                      >
-                        <div className="flex w-full items-center justify-between gap-1">
-                          <div className={`text-xs font-semibold ${isCurrentMonth ? 'text-slate-900' : 'text-slate-400'}`}>
-                            {dayNum}
-                          </div>
-                          {dayNum === 1 ? (
-                            <div className={`text-[11px] font-semibold ${isCurrentMonth ? 'text-slate-600' : 'text-slate-400'}`}>
-                              {monthNum}월
-                            </div>
-                          ) : null}
-                        </div>
-
-                        <div className="-mx-1.5 mt-1 flex flex-col overflow-x-visible overflow-y-hidden max-h-[96px] divide-y divide-slate-200 md:-mx-2 md:max-h-[112px]">
-                          {visible.map((t) => {
-                            const sub = subjects.find((s) => s.id === t.subjectId)
-                            const dday = formatDday(t.dueDate)
-                            const hasActual = typeof t.actualSeconds === 'number' && Number.isFinite(t.actualSeconds)
-                            const hasAnyRecord = Boolean(t.actualStartTime || t.actualEndTime || hasActual)
-                            const isCompleted = t.status === 'completed' || hasAnyRecord
-                            const goalLabelKo = formatRoundedDurationKoFromSeconds(t.plannedSeconds)
-                            const bg = sub?.color ?? '#94a3b8'
-                            const textColor = pickReadableTextColor(bg)
-
-                            const desktopTagText = isCompleted ? '✓' : dday ? dday : t.plannedSeconds > 0 ? goalLabelKo : null
-                            const mobileMaxUnits = 14
-                            const desktopMaxUnits = 22
-                            const titleMaxUnitsMobile = mobileMaxUnits
-                            const titleMaxUnitsDesktop = desktopMaxUnits - measureUnits(desktopTagText ?? '') - 1
-                            const titleMobile = truncateToUnits(t.title, titleMaxUnitsMobile)
-                            const titleDesktop = truncateToUnits(t.title, titleMaxUnitsDesktop)
-                            return (
-                              <button
-                                key={t.id}
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  openPreviewTask(t.id)
-                                }}
-                                draggable
-                                onDragStart={(e) => {
-                                  e.dataTransfer.setData('text/emma-task-id', t.id)
-                                  e.dataTransfer.effectAllowed = 'move'
-                                }}
-                                onDragEnd={() => setDragOverDate(null)}
-                                className="box-border block w-full select-none rounded-[3px] py-1 pl-1.5 pr-0 text-left text-[10px] leading-none hover:brightness-95 active:cursor-grabbing md:pl-2"
-                                style={{
-                                  background: bg,
-                                  color: textColor,
-                                }}
-                              >
-                                <div className="flex items-center justify-between gap-1">
-                                  <span className="min-w-0 overflow-hidden whitespace-nowrap">
-                                    <span className="md:hidden">{titleMobile}</span>
-                                    <span className="hidden md:inline">{titleDesktop}</span>
-                                  </span>
-                                  {isCompleted ? (
-                                    <span className="shrink-0 tabular-nums text-[9px] font-semibold leading-none tracking-tighter md:hidden">
-                                      <span className="bg-white/60 px-1 py-[1px] text-slate-900">✓</span>
-                                    </span>
-                                  ) : null}
-                                  {desktopTagText ? (
-                                    <span className="hidden shrink-0 tabular-nums text-[9px] font-semibold leading-none tracking-tighter md:inline">
-                                      <span
-                                        className={`bg-white/60 px-1 py-[1px] ${
-                                          isCompleted ? 'text-slate-900' : dday ? 'text-indigo-700' : 'text-slate-700'
-                                        }`}
-                                      >
-                                        {desktopTagText}
-                                      </span>
-                                    </span>
-                                  ) : null}
-                                </div>
-                              </button>
-                            )
-                          })}
-                          {more > 0 ? <div className="text-[11px] text-slate-400">+{more}</div> : null}
-                        </div>
-                      </div>
-                    )
-                  })}
+              {renderMonthGrid(prevMonthWeeks, prevMonth)}
             </div>
-          )
-	        })}
-	      </div>
-
-        {previewTask ? (
-          <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/30 px-3 pb-3 pt-20 md:items-center md:p-6">
             <div
-              className="absolute inset-0"
-              onClick={closePreviewTask}
-              aria-hidden="true"
-            />
-            <div className="relative w-full max-w-2xl overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-2xl">
-              <div className="px-5 py-5 md:px-6">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex min-w-0 items-center gap-2">
-                    {(() => {
-                      const hasAnyRecord = Boolean(
-                        previewTask.actualStartTime ||
-                          previewTask.actualEndTime ||
-                          typeof previewTask.actualSeconds === 'number'
-                      )
-                      const isCompleted = previewTask.status === 'completed' || hasAnyRecord
-                      const color = previewSubject?.color ?? '#94a3b8'
-                      return isCompleted ? (
-                        <span
-                          className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-[5px]"
-                          style={{ background: color }}
-                          aria-hidden="true"
-                        >
-                          <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 text-white">
-                            <path
-                              d="M20 6L9 17l-5-5"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="3"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                            />
-                          </svg>
-                        </span>
-                      ) : (
-                        <span
-                          className="inline-block h-4 w-4 shrink-0 rounded-[5px] border-2"
-                          style={{ borderColor: color }}
-                          aria-hidden="true"
-                        />
-                      )
-                    })()}
-                    <span className="truncate text-sm font-semibold text-slate-500">{previewSubject?.name ?? '과목'}</span>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-2">
-                  <Button variant="secondary" onClick={() => navigate(`/task/${previewTask.id}`)}>
-                    레거시
-                  </Button>
-                  <Button variant="secondary" onClick={() => setRecordTaskId(previewTask.id)}>
-                    기록
-                  </Button>
-                  <Button variant="secondary" onClick={() => setEditTaskId(previewTask.id)}>
-                    편집
-                  </Button>
-                  <Button variant="ghost" onClick={closePreviewTask}>
-                    닫기
-                  </Button>
-                </div>
-                </div>
+              className="absolute inset-0 overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-[0_1px_0_rgba(15,23,42,0.02)]"
+              style={{ transform: `translate3d(calc(100% + ${monthDragX}px), 0, 0)` }}
+            >
+              {renderMonthGrid(nextMonthWeeks, nextMonth)}
+            </div>
+          </div>
 
-                <div className="mt-2.5 text-2xl font-semibold leading-tight text-slate-900 md:text-[30px]">
-                  {previewTask.title}
-                </div>
-                {previewTask.date ? (
-                  <div className="mt-2 text-base text-slate-500">{formatTaskPreviewDate(previewTask.date)}</div>
-                ) : null}
-              </div>
+          <div
+            className="absolute inset-0 overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-[0_1px_0_rgba(15,23,42,0.02)]"
+            style={{
+              transform: `translate3d(${monthDragX}px, 0, 0)`,
+              transition: isMonthDragging ? 'none' : 'transform 220ms cubic-bezier(0.16, 1, 0.3, 1)',
+              willChange: 'transform',
+            }}
+          >
+            {renderMonthGrid(monthWeeks, displayMonth)}
+          </div>
+        </div>
+      </div>
 
-              <div className="grid grid-cols-1 gap-4 px-5 py-5 md:grid-cols-2 md:px-6">
-                {hasPreviewMeta ? (
-                  <div className="pt-2 md:col-span-2">
-                    <div className="space-y-3">
-                      {previewTask.dueDate ? (
-                        <div className="flex flex-nowrap items-center gap-2.5 text-base font-medium text-indigo-700">
-                          <span className="rounded-full bg-indigo-50 px-3 py-1.5 text-sm font-semibold text-indigo-700">
-                            <span className="mr-1.5 inline-flex align-middle">
-                              <FlagIcon className="h-4 w-4" />
-                            </span>
-                            {formatDday(previewTask.dueDate)}
-                          </span>
-                          <span className="min-w-0 whitespace-nowrap tracking-[-0.02em] md:tracking-[-0.03em] text-indigo-700">
-                            {formatDueDateLabel(previewTask.dueDate)}
-                          </span>
-                        </div>
-                      ) : null}
-                      <div className={`grid gap-3 ${previewHeadlineTimes.length > 1 && hasPreviewCompare ? 'md:grid-cols-2' : 'md:grid-cols-1'}`}>
-                        {previewHeadlineTimes.map((item) => (
-                          <div
-                            key={item.key}
-                            className={`flex min-w-0 flex-nowrap items-center gap-2.5 text-base font-medium ${
-                              item.kind === '목표' ? 'text-slate-400' : 'text-slate-700'
-                            }`}
-                          >
-                            <span
-                              className={`shrink-0 whitespace-nowrap rounded-full px-3 py-1.5 text-sm font-semibold ${
-                                item.kind === '기록' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-500'
-                              }`}
-                            >
-                              <span className="mr-1.5 inline-flex align-middle">
-                                {item.kind === '기록' ? <RecordPillIcon /> : <GoalPillIcon />}
-                              </span>
-                              {item.badge}
-                            </span>
-                            {item.text ? (
-                              <span className="min-w-0 whitespace-nowrap tracking-[-0.02em] md:tracking-[-0.04em]">
-                                {item.text}
-                              </span>
-                            ) : null}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                ) : null}
-                {hasPreviewCompare ? (
-                  <div className="pt-3 md:col-span-2">
-                    <div className="py-1 text-center">
-                      {previewActualSummary ? (
-                        <CompareRail
+	        {previewTask ? (
+	          <TaskDialogShell
+	            open
+	            onClose={closePreviewTask}
+	            onBackdropClick={() => {
+	              if (sheetClosing) return
+	              if (isAddMode) {
+	                closePreviewTask()
+	                return
+	              }
+	              if (!isEditingPreview) {
+	                animateClosePreview()
+	                return
+	              }
+	              const start = previewTask.recordCompleteOnly ? null : hmToMinutes(previewTask.actualStartTime ?? null)
+	              const end = previewTask.recordCompleteOnly ? null : hmToMinutes(previewTask.actualEndTime ?? null)
+	              const hasOnlyOne = !previewTask.recordCompleteOnly && ((start === null) !== (end === null))
+	              const invalidRange = !previewTask.recordCompleteOnly && start !== null && end !== null && end < start
+	              if (hasOnlyOne || invalidRange) {
+	                setEditExitConfirmOpen(true)
+	                return
+	              }
+	              setEditTaskId(null)
+	            }}
+	            titleRow={null}
+	            footer={null}
+	          >
+	              <div
+	                className="md:hidden px-5 pt-2"
+	                style={{ touchAction: 'none' }}
+	                onPointerDown={(e) => {
+	                  sheetDragRef.current = { startY: e.clientY, isDragging: true }
+	                  setSheetIsDragging(true)
+	                  sheetDragYRef.current = 0
+	                  setSheetDragY(0)
+	                  ;(e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId)
+	                }}
+	                onPointerMove={(e) => {
+	                  if (!sheetDragRef.current.isDragging) return
+	                  const dy = Math.max(0, e.clientY - sheetDragRef.current.startY)
+	                  sheetDragYRef.current = dy
+	                  setSheetDragY(dy)
+	                }}
+	                onPointerUp={(e) => {
+	                  if (!sheetDragRef.current.isDragging) return
+	                  sheetDragRef.current.isDragging = false
+	                  setSheetIsDragging(false)
+	                  const dy = sheetDragYRef.current
+	                  if (dy > 120) {
+	                    closePreviewTask()
+	                    return
+	                  }
+	                  sheetDragYRef.current = 0
+	                  setSheetDragY(0)
+	                  try {
+	                    ;(e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId)
+	                  } catch {
+	                    // ignore
+	                  }
+	                }}
+	                onPointerCancel={() => {
+	                  sheetDragRef.current.isDragging = false
+	                  setSheetIsDragging(false)
+	                  sheetDragYRef.current = 0
+	                  setSheetDragY(0)
+	                }}
+	              >
+	                <div
+	                  role="button"
+	                  tabIndex={0}
+	                  aria-label="드래그로 닫기"
+	                  className="mx-auto h-1.5 w-12 rounded-full bg-slate-300"
+	                />
+	              </div>
+	              <div className="px-5 py-5 md:px-6">
+	                {(() => {
+	                  const isEditing = editTaskId === previewTask.id
+	                  return (
+	                    <>
+	                      <div className="flex items-center justify-between gap-3">
+	                        {isEditing ? (
+	                          <div ref={subjectPickerRef} className="no-scrollbar -mx-1 flex min-w-0 flex-1 gap-1.5 overflow-x-auto overflow-y-visible px-1 py-1">
+	                            {scopedSubjects.map((subject) => {
+	                              const selected = subject.id === previewTask.subjectId
+	                              return (
+	                                <button
+	                                  key={subject.id}
+	                                  type="button"
+	                                  ref={(el) => {
+	                                    subjectPillRefs.current[subject.id] = el
+	                                  }}
+	                                  onClick={() => {
+	                                    patchPreviewTask({ subjectId: subject.id })
+	                                    if (!editTitleDraft.trim() && isAddMode) setEditTitleSample('제목 추가')
+	                                  }}
+	                                  className={`shrink-0 rounded-full px-3.5 py-1.5 text-[13px] font-semibold transition ${
+	                                    selected
+	                                      ? 'ring-2 ring-slate-900/15 ring-offset-1 opacity-100'
+	                                      : 'border border-slate-200/70 opacity-45 saturate-[0.75]'
+	                                  }`}
+	                                  style={{
+	                                    background: subject.color,
+	                                    color: pickReadableTextColor(subject.color),
+	                                  }}
+	                                  aria-label={`과목 ${subject.name} 선택`}
+	                                >
+	                                  {subject.name}
+	                                </button>
+	                              )
+	                            })}
+	                          </div>
+	                        ) : (
+	                          <div className="flex min-w-0 items-center gap-2">
+	                            {(() => {
+	                              const hasAnyRecord = Boolean(
+	                                previewTask.actualStartTime ||
+	                                  previewTask.actualEndTime ||
+	                                  typeof previewTask.actualSeconds === 'number',
+	                              )
+	                              const isCompleted = previewTask.status === 'completed' || hasAnyRecord
+	                              const color = previewSubject?.color ?? '#94a3b8'
+	                              return isCompleted ? (
+	                                <span
+	                                  className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-[5px]"
+	                                  style={{ background: color }}
+	                                  aria-hidden="true"
+	                                >
+	                                  <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 text-white">
+	                                    <path
+	                                      d="M20 6L9 17l-5-5"
+	                                      fill="none"
+	                                      stroke="currentColor"
+	                                      strokeWidth="3"
+	                                      strokeLinecap="round"
+	                                      strokeLinejoin="round"
+	                                    />
+	                                  </svg>
+	                                </span>
+	                              ) : (
+	                                <span
+	                                  className="inline-block h-4 w-4 shrink-0 rounded-[5px] border-2"
+	                                  style={{ borderColor: color }}
+	                                  aria-hidden="true"
+	                                />
+	                              )
+	                            })()}
+	                            <span className="truncate text-sm font-semibold text-slate-500">{previewSubject?.name ?? '과목'}</span>
+	                          </div>
+	                        )}
+	                        <button
+	                          type="button"
+	                          onClick={closePreviewTask}
+	                          className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
+	                          aria-label="닫기"
+	                        >
+	                          <span aria-hidden="true" className="text-xl leading-none">
+	                            ×
+	                          </span>
+	                        </button>
+	                      </div>
+
+	                      {isEditing ? (
+	                        <div
+	                          className="mt-2.5 rounded-2xl bg-slate-50 px-4 py-3"
+	                        >
+	                          <input
+	                            value={editTitleDraft}
+	                            onChange={(e) => setEditTitleDraft(e.target.value)}
+	                            placeholder={editTitleSample || '제목 추가'}
+	                            className="w-full bg-transparent text-2xl font-semibold leading-tight text-slate-900 outline-none placeholder:text-slate-400 md:text-[30px]"
+	                          />
+	                        </div>
+	                      ) : (
+	                        <div className="mt-2.5 text-2xl font-semibold leading-tight text-slate-900 md:text-[30px]">
+	                          {previewTask.title}
+	                        </div>
+	                      )}
+	                    </>
+	                  )
+	                })()}
+	                {isEditingPreview ? (
+	                  <div className="mt-2 px-4">
+	                    <button
+	                      type="button"
+	                      onClick={() => openCalendarFor('date')}
+	                      className="inline-flex cursor-pointer items-center gap-2 text-base font-medium text-slate-500 underline decoration-slate-200 decoration-dotted underline-offset-4 transition hover:text-slate-700 hover:decoration-slate-400"
+	                      aria-label="날짜 선택"
+	                    >
+	                      <span>{formatTaskPreviewDate(previewTask.date) ?? '날짜 선택'}</span>
+	                      {previewTask.date ? (
+	                        <span
+	                          role="button"
+	                          tabIndex={0}
+	                          onClick={(e) => {
+	                            e.stopPropagation()
+	                            patchPreviewTask({ date: '' })
+	                          }}
+	                          onKeyDown={(e) => {
+	                            if (e.key !== 'Enter' && e.key !== ' ') return
+	                            e.preventDefault()
+	                            e.stopPropagation()
+	                            patchPreviewTask({ date: '' })
+	                          }}
+	                          className="shrink-0 text-base font-semibold text-slate-400 no-underline transition hover:text-slate-600"
+	                          aria-label="날짜 삭제"
+	                        >
+	                          ×
+	                        </span>
+	                      ) : null}
+	                    </button>
+	                  </div>
+	                ) : previewTask.date ? (
+	                  <div className="mt-2 text-base text-slate-500">{formatTaskPreviewDate(previewTask.date)}</div>
+	                ) : null}
+	              </div>
+
+	              <div className="grid grid-cols-1 gap-4 px-5 py-5 md:grid-cols-2 md:px-6">
+		                {hasPreviewMeta ? (
+		                  <div className="pt-2 md:col-span-2">
+		                    <div className="space-y-3">
+		                      {isEditingPreview ? (
+		                        <div className="space-y-3">
+		                          <div className="flex flex-nowrap items-center gap-2.5 text-base font-medium text-indigo-700">
+	                            <button
+	                              type="button"
+	                              onClick={() => openCalendarFor('dueDate')}
+	                              className="shrink-0 cursor-pointer rounded-full bg-indigo-50 px-3 py-1.5 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-100"
+	                              aria-label="디데이 선택"
+	                            >
+	                              {formatDday(previewTask.dueDate) ?? '마감'}
+	                            </button>
+		                            <button
+		                              type="button"
+		                              onClick={() => openCalendarFor('dueDate')}
+		                              className={`min-w-0 cursor-pointer whitespace-nowrap text-left tracking-[-0.02em] underline decoration-dotted underline-offset-4 transition md:tracking-[-0.03em] ${
+		                                previewTask.dueDate
+		                                  ? 'text-indigo-700 decoration-indigo-200 hover:decoration-indigo-400'
+		                                  : 'text-slate-400 decoration-slate-200 hover:decoration-slate-300'
+		                              }`}
+		                              aria-label="마감 날짜 선택"
+		                            >
+		                              {previewTask.dueDate ? formatDueDateLabel(previewTask.dueDate) : '마감 날짜 선택'}
+		                            </button>
+		                            {previewTask.dueDate ? (
+		                              <button
+		                                type="button"
+		                                onClick={() => patchPreviewTask({ dueDate: undefined })}
+		                                className="shrink-0 cursor-pointer text-base font-semibold text-slate-400 transition hover:text-slate-600"
+		                                aria-label="디데이 삭제"
+		                              >
+		                                ×
+		                              </button>
+		                            ) : null}
+		                          </div>
+
+		                          {editValidationMessage ? (
+		                            <div className="text-sm font-semibold text-rose-700">{editValidationMessage}</div>
+		                          ) : null}
+
+			                          <div className="flex min-w-0 flex-nowrap items-center gap-3 text-base font-medium text-slate-700">
+			                            <span className="shrink-0 whitespace-nowrap rounded-full bg-slate-100 px-3 py-1.5 text-sm font-semibold text-slate-500">
+			                              계획
+			                            </span>
+			                            <button
+			                              type="button"
+			                              onClick={() => {
+			                                setTimePickerField('plannedStartTime')
+			                                setTimePickerOpen(true)
+			                              }}
+			                              className={`min-w-0 cursor-pointer truncate whitespace-nowrap text-left tracking-[-0.02em] underline decoration-dotted underline-offset-4 transition md:tracking-[-0.04em] ${
+			                                previewTask.plannedStartTime
+			                                  ? 'text-slate-700 decoration-slate-200 hover:decoration-slate-400'
+			                                  : 'text-slate-400 decoration-slate-200 hover:decoration-slate-300'
+			                              }`}
+			                              aria-label="시작시간 입력"
+			                            >
+			                              {previewTask.plannedStartTime
+			                                ? `${formatMeridiemHm(previewTask.plannedStartTime) ?? previewTask.plannedStartTime}부터`
+			                                : '시작시간 입력'}
+			                            </button>
+			                            {previewTask.plannedStartTime ? (
+			                              <button
+			                                type="button"
+			                                onClick={() => patchPreviewTask({ plannedStartTime: undefined })}
+			                                className="shrink-0 cursor-pointer text-base font-semibold text-slate-400 transition hover:text-slate-600"
+			                                aria-label="계획 시작시간 삭제"
+			                              >
+			                                ×
+			                              </button>
+			                            ) : null}
+			                            <span className="shrink-0 px-1.5 text-slate-400">·</span>
+			                            <DurationPickerButton
+			                              valueSeconds={plannedSecondsDraft}
+			                              onChangeSeconds={(nextSeconds) => setPlannedSecondsDraft(nextSeconds)}
+			                              maxHours={99}
+			                              buttonLabel={plannedSecondsDraft > 0 ? formatDurationPreciseKo(plannedSecondsDraft) : '소요시간 입력'}
+			                              buttonClassName={`min-w-0 cursor-pointer truncate whitespace-nowrap text-left text-base font-medium tracking-[-0.02em] underline decoration-dotted underline-offset-4 transition md:tracking-[-0.04em] ${
+			                                plannedSecondsDraft > 0
+			                                  ? 'text-slate-700 decoration-slate-200 hover:decoration-slate-400'
+			                                  : 'text-slate-400 decoration-slate-200 hover:decoration-slate-300'
+			                              }`}
+			                              ariaLabel="소요시간 입력"
+			                              open={plannedDurationPickerOpen}
+			                              onOpenChange={(next) => {
+			                                setPlannedDurationPickerOpen(next)
+			                                if (!next) patchPreviewTask({ plannedSeconds: plannedSecondsDraft })
+			                              }}
+			                            />
+			                            {plannedSecondsDraft > 0 ? (
+			                              <button
+			                                type="button"
+			                                onClick={() => {
+			                                  setPlannedSecondsDraft(0)
+			                                  patchPreviewTask({ plannedSeconds: 0 })
+			                                }}
+			                                className="shrink-0 cursor-pointer text-base font-semibold text-slate-400 transition hover:text-slate-600"
+			                                aria-label="계획 소요시간 삭제"
+			                              >
+			                                ×
+			                              </button>
+			                            ) : null}
+			                          </div>
+
+		                          <div className="flex flex-col gap-2 md:flex-row md:items-center">
+		                            <div className="flex min-w-0 flex-nowrap items-center gap-3 text-base font-medium text-slate-700 md:flex-1">
+		                              <span className="shrink-0 whitespace-nowrap rounded-full bg-slate-900 px-3 py-1.5 text-sm font-semibold text-white">
+		                                완료
+		                              </span>
+		                              {previewTask.recordCompleteOnly ? (
+		                                <span className="min-w-0 truncate whitespace-nowrap tracking-[-0.02em] text-slate-700 md:tracking-[-0.04em]">
+		                                  완료 처리
+		                                </span>
+		                              ) : (
+		                                <>
+		                                  <button
+		                                    type="button"
+		                                    onClick={() => {
+		                                      setTimePickerField('actualStartTime')
+		                                      setTimePickerOpen(true)
+		                                    }}
+		                                    className={`min-w-0 truncate whitespace-nowrap text-left tracking-[-0.02em] underline decoration-dotted underline-offset-4 transition md:tracking-[-0.04em] cursor-pointer ${
+		                                      previewTask.actualStartTime
+		                                        ? 'text-slate-700 decoration-slate-200 hover:decoration-slate-400'
+		                                        : 'text-slate-400 decoration-slate-200 hover:decoration-slate-300'
+		                                    }`}
+		                                    aria-label="시작시간 입력"
+		                                  >
+		                                    {previewTask.actualStartTime
+		                                      ? `${formatMeridiemHm(previewTask.actualStartTime) ?? previewTask.actualStartTime}부터`
+		                                      : '시작시간 입력'}
+		                                  </button>
+		                                  <span className="shrink-0 px-1.5 text-slate-400">·</span>
+		                                  <button
+		                                    type="button"
+		                                    onClick={() => {
+		                                      setTimePickerField('actualEndTime')
+		                                      setTimePickerOpen(true)
+		                                    }}
+		                                    className={`min-w-0 truncate whitespace-nowrap text-left tracking-[-0.02em] underline decoration-dotted underline-offset-4 transition md:tracking-[-0.04em] cursor-pointer ${
+		                                      previewTask.actualEndTime
+		                                        ? 'text-slate-700 decoration-slate-200 hover:decoration-slate-400'
+		                                        : 'text-slate-400 decoration-slate-200 hover:decoration-slate-300'
+		                                    }`}
+		                                    aria-label="종료시간 입력"
+		                                  >
+		                                    {previewTask.actualEndTime
+		                                      ? `${formatMeridiemHm(previewTask.actualEndTime) ?? previewTask.actualEndTime}까지`
+		                                      : '종료시간 입력'}
+		                                  </button>
+		                                  {previewTask.actualStartTime || previewTask.actualEndTime ? (
+		                                    <button
+		                                      type="button"
+                                      onClick={() => {
+                                        patchPreviewTask({
+                                          actualStartTime: undefined,
+                                          actualEndTime: undefined,
+                                          actualSeconds: undefined,
+                                          status: 'pending',
+                                        })
+                                      }}
+		                                      className="shrink-0 cursor-pointer text-base font-semibold text-slate-400 transition hover:text-slate-600"
+		                                      aria-label="완료 삭제"
+		                                    >
+		                                      ×
+		                                    </button>
+		                                  ) : null}
+		                                </>
+		                              )}
+		                            </div>
+
+		                            <label className="flex w-fit cursor-pointer items-center gap-2 self-end text-sm font-semibold text-slate-600 md:ml-auto md:self-auto">
+		                            <input
+		                              type="checkbox"
+		                              checked={Boolean(previewTask.recordCompleteOnly)}
+		                              onChange={(e) => {
+		                                const checked = e.target.checked
+		                                patchPreviewTask({
+		                                  recordCompleteOnly: checked,
+		                                  status: checked ? 'completed' : 'pending',
+		                                  actualStartTime: undefined,
+		                                  actualEndTime: undefined,
+		                                  actualSeconds: undefined,
+		                                })
+		                              }}
+		                              className="h-4 w-4 rounded border-slate-300"
+		                            />
+		                            완료 처리
+		                          </label>
+		                          </div>
+		                        </div>
+	                      ) : (
+	                        <>
+	                          {previewTask.dueDate ? (
+	                            <div className="flex flex-nowrap items-center gap-2.5 text-base font-medium text-indigo-700">
+	                              <span className="rounded-full bg-indigo-50 px-3 py-1.5 text-sm font-semibold text-indigo-700">
+	                                {formatDday(previewTask.dueDate)}
+	                              </span>
+	                              <span className="min-w-0 whitespace-nowrap tracking-[-0.02em] md:tracking-[-0.03em] text-indigo-700">
+	                                {formatDueDateLabel(previewTask.dueDate)}
+	                              </span>
+	                            </div>
+	                          ) : null}
+	                          <div className={`grid gap-3 ${previewHeadlineTimes.length > 1 && hasPreviewCompare ? 'md:grid-cols-2' : 'md:grid-cols-1'}`}>
+	                            {previewHeadlineTimes.map((item) => (
+	                              <div
+	                                key={item.key}
+	                                className={`flex w-full min-w-0 flex-nowrap items-center gap-2.5 text-base font-medium ${
+	                                  item.kind === '계획' ? 'text-slate-400' : 'text-slate-700'
+	                                }`}
+	                              >
+	                                <span
+	                                  className={`shrink-0 whitespace-nowrap rounded-full px-3 py-1.5 text-sm font-semibold ${
+	                                    item.kind === '완료' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-500'
+	                                  }`}
+	                                >
+	                                  {item.badge}
+	                                </span>
+	                                {item.text ? (
+	                                  <span className="min-w-0 flex-1 whitespace-nowrap tracking-[-0.02em] md:tracking-[-0.04em]">
+	                                    {item.text}
+	                                  </span>
+	                                ) : null}
+	                              </div>
+	                            ))}
+	                          </div>
+	                        </>
+	                      )}
+		                    </div>
+		                  </div>
+		                ) : null}
+	                {!isEditingPreview && hasPreviewCompare ? (
+	                  <div className="pt-3 md:col-span-2">
+	                    <div className="py-1 text-center">
+	                      {previewActualSummary ? (
+	                        <CompareRail
                           goalLabel={previewActualSummary.goalLabel}
                           actualLabel={previewActualSummary.actualLabel}
                           deltaLabel={previewActualSummary.deltaLabel}
@@ -874,52 +1616,369 @@ export function CalendarView() {
                     <div className="mt-1.5 whitespace-pre-wrap text-base font-medium leading-7 text-slate-900">{previewTask.memo}</div>
                   </div>
                 ) : null}
-              </div>
-            </div>
-          </div>
-        ) : null}
-        <NewTaskSheet
-          open={Boolean(editTaskId && editTask)}
-          taskId={editTaskId}
-          initial={
-            editTask
-              ? {
-                  subjectId: editTask.subjectId,
-                  title: editTask.title,
-                  date: editTask.date,
-                  dueDate: editTask.dueDate ?? '',
-                  plannedStartTime: editTask.plannedStartTime ?? '',
-                  plannedSeconds: editTask.plannedSeconds,
-                }
-              : null
-          }
-          onClose={() => setEditTaskId(null)}
-        />
-        <TaskRecordSheet taskId={recordTaskId} open={Boolean(recordTaskId)} onClose={() => setRecordTaskId(null)} />
+	              </div>
+
+	              {isEditingPreview ? (
+	                <div className="sticky bottom-0 border-t border-slate-100 bg-white/95 px-5 py-4 backdrop-blur md:px-6">
+	                  {(() => {
+	                    if (!previewTask) return null
+	                    if (previewTask.recordCompleteOnly) return null
+	                    const s = hmToMinutes(previewTask.actualStartTime ?? null)
+	                    const e = hmToMinutes(previewTask.actualEndTime ?? null)
+	                    const hasOnlyOne = (s === null) !== (e === null)
+	                    if (!hasOnlyOne) return null
+	                    return (
+	                      <div className="mb-3 rounded-xl bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800">
+	                        완료 시작시간과 종료시간을 모두 입력해야 완료할 수 있어요.
+	                      </div>
+	                    )
+	                  })()}
+	                  <div className="grid grid-cols-2 gap-3">
+	                  <button
+	                    type="button"
+	                    onClick={() => {
+	                      if (!previewTask) return
+	                      const draft = editTitleDraft.trim()
+	                      const original = (editTitleOriginalRef.current?.taskId === previewTask.id ? editTitleOriginalRef.current.title : previewTask.title ?? '').trim()
+	                      const addFallbackTitle = buildNextTaskTitle((previewSubject?.name ?? '').trim(), tasks)
+	                      const nextTitle = isAddMode
+	                        ? draft || addFallbackTitle
+	                        : draft || original || (previewSubject?.name ?? '').trim()
+	                      if (!previewTask.recordCompleteOnly) {
+	                        const start = hmToMinutes(previewTask.actualStartTime ?? null)
+	                        const end = hmToMinutes(previewTask.actualEndTime ?? null)
+	                        const hasOnlyOne = (start === null) !== (end === null)
+	                        if (hasOnlyOne) {
+	                          setEditValidationMessage('완료 시작시간과 종료시간을 모두 입력해야 저장할 수 있어요.')
+	                          return
+	                        }
+	                      }
+	                      const start = hmToMinutes(previewTask.actualStartTime ?? null)
+	                      const end = hmToMinutes(previewTask.actualEndTime ?? null)
+	                      if (start !== null && end !== null && end < start) {
+	                        setEditValidationMessage('완료 종료시간이 시작시간보다 빨라요.')
+	                        return
+	                      }
+	                      setEditValidationMessage(null)
+	                      if (isAddMode) {
+	                        const createdId = commitAddDraft({ ...previewTask, title: nextTitle })
+	                        if (!createdId) return
+	                        setEditTaskId(null)
+	                        setEditDraft(null)
+	                        closePreviewTask()
+	                        const hasDateAssigned = Boolean(previewTask.date && String(previewTask.date).trim())
+	                        setStartOpen(!hasDateAssigned)
+	                        return
+	                      }
+	                      if (!storedPreviewTask) return
+	                      const base = editDraft ?? storedPreviewTask
+	                      commitEditDraft(storedPreviewTask, { ...base, title: nextTitle, updatedAt: new Date().toISOString() })
+	                      setEditTaskId(null)
+	                      setEditDraft(null)
+	                      if (autoCloseAfterCompleteTaskId === previewTask.id) {
+	                        const hasDateAssigned = Boolean(previewTask.date && String(previewTask.date).trim())
+	                        setStartOpen(!hasDateAssigned)
+	                        setAutoCloseAfterCompleteTaskId(null)
+	                        animateClosePreview()
+	                      }
+	                    }}
+	                    disabled={(() => {
+	                      if (!previewTask) return true
+	                      if (previewTask.recordCompleteOnly) return false
+	                      const start = hmToMinutes(previewTask.actualStartTime ?? null)
+	                      const end = hmToMinutes(previewTask.actualEndTime ?? null)
+	                      const hasOnlyOne = (start === null) !== (end === null)
+	                      const invalidRange = start !== null && end !== null && end < start
+	                      return hasOnlyOne || invalidRange
+	                    })()}
+	                    className="inline-flex h-10 w-full items-center justify-center rounded-xl bg-slate-900 px-3 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:bg-slate-300"
+	                  >
+	                    {isAddMode ? '등록' : '완료'}
+	                  </button>
+	                  <button
+	                    type="button"
+	                    onClick={() => {
+	                      if (!previewTask) return
+	                      if (isAddMode) {
+	                        closePreviewTask()
+	                        return
+	                      }
+	                      const start = previewTask.recordCompleteOnly ? null : hmToMinutes(previewTask.actualStartTime ?? null)
+	                      const end = previewTask.recordCompleteOnly ? null : hmToMinutes(previewTask.actualEndTime ?? null)
+	                      const hasOnlyOne = !previewTask.recordCompleteOnly && ((start === null) !== (end === null))
+	                      const invalidRange = !previewTask.recordCompleteOnly && start !== null && end !== null && end < start
+	                      if (hasOnlyOne || invalidRange) {
+	                        setEditExitConfirmOpen(true)
+	                        return
+	                      }
+	                      setEditTaskId(null)
+	                      setEditDraft(null)
+	                      setEditValidationMessage(null)
+	                    }}
+	                    className="inline-flex h-10 w-full items-center justify-center rounded-xl bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-200"
+	                  >
+	                    {isAddMode ? '등록 취소' : '편집 취소'}
+	                  </button>
+	                  </div>
+	                </div>
+	              ) : null}
+	              {!isEditingPreview ? (
+	                <div className="sticky bottom-0 border-t border-slate-100 bg-white/95 px-5 py-4 backdrop-blur md:px-6">
+	                  <div className="grid grid-cols-3 gap-2">
+	                    <button
+	                      type="button"
+	                      onClick={() => setTimerTaskId(previewTask.id)}
+	                      className="inline-flex h-10 items-center justify-center rounded-xl bg-slate-900 px-3 text-sm font-semibold text-white transition hover:bg-slate-800"
+	                    >
+	                      타이머
+	                    </button>
+	                    <button
+	                      type="button"
+	                      onClick={() => setEditTaskId(previewTask.id)}
+	                      className="inline-flex h-10 items-center justify-center rounded-xl bg-slate-100 px-3 text-sm font-semibold text-slate-900 transition hover:bg-slate-200"
+	                    >
+	                      편집
+	                    </button>
+	                    <button
+	                      type="button"
+	                      onClick={() => {
+	                        deleteTask(previewTask.id)
+	                        closePreviewTask()
+	                      }}
+	                      className="inline-flex h-10 items-center justify-center rounded-xl px-3 text-sm font-semibold text-rose-600 transition hover:bg-rose-50 hover:text-rose-700"
+	                      aria-label="태스크 삭제"
+	                    >
+	                      삭제
+	                    </button>
+	                  </div>
+	                </div>
+	              ) : null}
+		          </TaskDialogShell>
+		        ) : null}
+		        {isEditingPreview && datePickerField ? (
+		              <div
+		                className="fixed inset-0 z-[75] flex items-center justify-center bg-slate-900/35 px-4"
+		                onMouseDown={(e) => {
+		                  e.stopPropagation()
+		                  if (e.target === e.currentTarget) setDatePickerField(null)
+		                }}
+		                onTouchStart={(e) => {
+		                  e.stopPropagation()
+		                  if (e.target === e.currentTarget) setDatePickerField(null)
+		                }}
+		              >
+		                <div className="w-full max-w-sm rounded-2xl bg-white p-4 shadow-2xl">
+		                  <div className="flex items-center justify-between">
+		                    <div className="text-base font-semibold text-slate-900">{datePickerField === 'date' ? '날짜 선택' : '디데이 선택'}</div>
+		                    <button
+		                      type="button"
+		                      onClick={() => setDatePickerField(null)}
+		                      className="rounded-lg px-2 py-1 text-sm font-semibold text-slate-500 hover:bg-slate-100"
+		                      aria-label="닫기"
+		                    >
+		                      닫기
+		                    </button>
+		                  </div>
+
+		                  <div className="mt-3 flex items-center justify-between">
+		                    <button
+		                      type="button"
+		                      onClick={() => setCalendarMonth((cur) => startOfMonth(subMonths(cur, 1)))}
+		                      className="rounded-xl bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-200"
+		                      aria-label="이전 달"
+		                    >
+		                      ‹
+		                    </button>
+		                    <div className="text-sm font-semibold text-slate-900">{format(calendarMonth, 'yyyy년 M월')}</div>
+		                    <button
+		                      type="button"
+		                      onClick={() => setCalendarMonth((cur) => startOfMonth(addMonths(cur, 1)))}
+		                      className="rounded-xl bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-200"
+		                      aria-label="다음 달"
+		                    >
+		                      ›
+		                    </button>
+		                  </div>
+
+		                  <div className="mt-3 grid grid-cols-7 gap-1 text-center text-[11px] font-semibold text-slate-400">
+		                    {['일', '월', '화', '수', '목', '금', '토'].map((d) => (
+		                      <div key={d}>{d}</div>
+		                    ))}
+		                  </div>
+
+		                  {(() => {
+		                    const first = startOfMonth(calendarMonth)
+		                    const offset = getDay(first)
+		                    const start = new Date(first)
+		                    start.setDate(first.getDate() - offset)
+		                    const selected = parseYmd(datePickerField === 'date' ? (previewTask?.date ?? '') : (previewTask?.dueDate ?? ''))
+		                    const today = new Date()
+		                    const days = Array.from({ length: 42 }, (_, i) => {
+		                      const d = new Date(start)
+		                      d.setDate(start.getDate() + i)
+		                      return d
+		                    })
+		                    return (
+		                      <div className="mt-2 grid grid-cols-7 gap-1">
+		                        {days.map((d) => {
+		                          const inMonth = isSameMonth(d, calendarMonth)
+		                          const isSelected = selected ? isSameDay(d, selected) : false
+		                          const isToday = isSameDay(d, today)
+		                          return (
+		                            <button
+		                              key={d.toISOString()}
+		                              type="button"
+		                              onClick={() => pickCalendarDay(d)}
+		                              className={`h-10 rounded-xl text-sm font-semibold transition ${
+		                                isSelected
+		                                  ? 'bg-slate-900 text-white'
+		                                  : inMonth
+		                                    ? 'text-slate-900 hover:bg-slate-100'
+		                                    : 'text-slate-300 hover:bg-slate-50'
+		                              } ${isToday && !isSelected ? 'ring-1 ring-slate-300' : ''}`}
+		                              aria-label={format(d, 'yyyy년 M월 d일')}
+		                            >
+		                              {d.getDate()}
+		                            </button>
+		                          )
+		                        })}
+		                      </div>
+		                    )
+		                  })()}
+		                </div>
+		              </div>
+			        ) : null}
+		            {isEditingPreview && timePickerOpen ? (
+		              <TimePickerModal
+		                open
+		                onClose={() => setTimePickerOpen(false)}
+		                title={
+		                  timePickerField === 'actualStartTime'
+		                    ? '완료 시작시간'
+		                    : timePickerField === 'actualEndTime'
+		                      ? '완료 종료시간'
+		                      : '계획 시작시간'
+		                }
+		                initialHm={
+		                  (() => {
+		                    if (!previewTask) return null
+		                    return timePickerField === 'actualStartTime'
+		                      ? previewTask.actualStartTime ?? previewTask.actualEndTime ?? null
+		                      : timePickerField === 'actualEndTime'
+		                        ? previewTask.actualEndTime ?? previewTask.actualStartTime ?? null
+		                        : previewTask.plannedStartTime ?? null
+		                  })()
+		                }
+		                onApply={(hm) => {
+		                  if (!previewTask) return
+		                  if (timePickerField === 'actualStartTime') {
+		                    patchPreviewTask({
+		                      actualStartTime: hm,
+		                      actualEndTime: previewTask.actualEndTime ? previewTask.actualEndTime : hm,
+		                    })
+		                  } else if (timePickerField === 'actualEndTime') {
+		                    patchPreviewTask({
+		                      actualEndTime: hm,
+		                      actualStartTime: previewTask.actualStartTime ? previewTask.actualStartTime : hm,
+		                    })
+		                  } else {
+		                    patchPreviewTask({ plannedStartTime: hm })
+		                  }
+		                }}
+		                validate={(hm) => {
+		                  const proposedMin = hmToMinutes(hm)
+		                  if (proposedMin === null) return null
+		                  const startMin = timePickerField === 'actualEndTime' ? hmToMinutes(previewTask?.actualStartTime ?? null) : null
+		                  const endMin = timePickerField === 'actualStartTime' ? hmToMinutes(previewTask?.actualEndTime ?? null) : null
+		                  const invalid =
+		                    (timePickerField === 'actualStartTime' && endMin !== null && endMin < proposedMin) ||
+		                    (timePickerField === 'actualEndTime' && startMin !== null && proposedMin < startMin)
+		                  return invalid ? '종료시간이 시작시간보다 빨라요.' : null
+		                }}
+		              />
+		            ) : null}
+		            {isEditingPreview && editExitConfirmOpen ? (
+		              <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-900/35 px-4">
+		                <div className="w-full max-w-sm rounded-2xl bg-white p-4 shadow-2xl">
+		                  <div className="text-base font-semibold text-slate-900">편집을 취소할까요?</div>
+		                  <div className="mt-2 text-sm text-slate-500">
+		                    완료 시작시간과 종료시간이 아직 완성되지 않았어요. 편집을 취소하거나 계속 편집할 수 있어요.
+		                  </div>
+		                  <div className="mt-4 flex justify-end gap-2">
+		                    <Button
+		                      variant="ghost"
+		                      onClick={() => {
+		                        setEditExitConfirmOpen(false)
+		                      }}
+		                    >
+		                      계속 편집
+		                    </Button>
+		                    <Button
+		                      variant="secondary"
+		                      onClick={() => {
+		                        setEditExitConfirmOpen(false)
+		                        setEditTaskId(null)
+		                        setEditValidationMessage(null)
+		                      }}
+		                    >
+		                      편집 취소
+		                    </Button>
+		                  </div>
+		                </div>
+		              </div>
+		            ) : null}
+		        {previewTask && !isAddMode && timerTaskId === previewTask.id ? (
+	          <TaskTimerModal
+	            plannedSeconds={previewTask.plannedSeconds ?? 0}
+	            subjectName={previewSubject?.name ?? '과목'}
+	            taskTitle={previewTask.title ?? ''}
+	            subjectColor={previewSubject?.color ?? '#94a3b8'}
+	            onClose={() => setTimerTaskId(null)}
+	            onRecord={(result) => {
+	              patchPreviewTask({
+	                actualStartTime: result.actualStartTime,
+	                actualEndTime: result.actualEndTime,
+	                actualSeconds: result.actualSeconds,
+	              })
+	            }}
+	          />
+	        ) : null}
 
 	      {/* Always-on floating "Start 예정" popup above bottom bar (mobile). */}
-		      <div
-		        data-start-dock-root
-		        className={`fixed z-40 md:hidden ${startDockOrigin} will-change-[width,height,border-radius]`}
+	      <div
+	        data-start-dock-root
+	        className={`fixed z-40 flex items-start justify-end gap-[10px] md:hidden ${startDockOrigin}`}
 	        style={{
 	          right: '0.375rem',
 	          bottom: startDock.v === 'bottom' ? 'calc(var(--bottom-nav-h, 0px) + env(safe-area-inset-bottom) + 10px)' : undefined,
 	          top: startDock.v === 'top' ? `${topDockY}px` : undefined,
-	          width: startOpen ? 'calc(100vw - 0.75rem)' : '64px',
+	          width: startOpen ? 'calc(100vw - 0.75rem)' : '138px',
 	          height: startOpen ? '173px' : '64px',
-	          borderRadius: startOpen ? 24 : 9999,
-	          transition: startOpen
-	            ? // Open: radius snaps first (already reduced), then only size expands.
-	              'top 160ms ease-in-out, bottom 160ms ease-in-out, border-radius 0ms linear, width 360ms cubic-bezier(0.16, 1, 0.3, 1), height 360ms cubic-bezier(0.16, 1, 0.3, 1)'
-	            : // Close: keep the nice morphing radius animation.
-	              'top 160ms ease-in-out, bottom 160ms ease-in-out, border-radius 260ms cubic-bezier(0.16, 1, 0.3, 1), width 360ms cubic-bezier(0.16, 1, 0.3, 1) 30ms, height 360ms cubic-bezier(0.16, 1, 0.3, 1) 30ms',
 	        }}
 	      >
+	        {!startOpen ? (
+	          <button
+	            type="button"
+	            className="flex h-[64px] w-[64px] items-center justify-center rounded-full bg-slate-900 text-white shadow-xl ring-1 ring-black/10"
+	            onClick={() => openTaskAdd()}
+	            aria-label="일정 추가"
+	          >
+	            <span aria-hidden="true" className="text-3xl leading-none">
+	              +
+	            </span>
+	          </button>
+	        ) : null}
 	        <div
-	          className="relative h-full w-full overflow-hidden border border-white/8 shadow-xl ring-1 ring-black/5 backdrop-blur-sm backdrop-saturate-105"
+	          className={`relative border border-white/8 shadow-xl ring-1 ring-black/5 backdrop-blur-sm backdrop-saturate-105 will-change-[width,height,border-radius]`}
 	          style={{
-	            borderRadius: 'inherit',
-	            backgroundColor: startOpen ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.92)',
+	            width: startOpen ? '100%' : '64px',
+	            height: startOpen ? '100%' : '64px',
+	            borderRadius: startOpen ? 24 : 9999,
+	            backgroundColor: startOpen ? 'rgba(255,255,255,0.82)' : 'rgba(255,255,255,0.96)',
+	            overflow: startOpen ? 'hidden' : 'visible',
+	            transition: startOpen
+	              ? 'border-radius 0ms linear, width 360ms cubic-bezier(0.16, 1, 0.3, 1), height 360ms cubic-bezier(0.16, 1, 0.3, 1)'
+	              : 'border-radius 260ms cubic-bezier(0.16, 1, 0.3, 1), width 360ms cubic-bezier(0.16, 1, 0.3, 1) 30ms, height 360ms cubic-bezier(0.16, 1, 0.3, 1) 30ms',
 	          }}
 	        >
 	          <button
@@ -938,7 +1997,14 @@ export function CalendarView() {
 		            style={{ touchAction: 'none' }}
 		            aria-label="시작 예정 열기"
 		          >
-		            <StartPendingBubbleIcon />
+		            <div className="relative">
+		              <StartPendingBubbleIcon />
+		              {unassignedPending.length ? (
+		                <div className="absolute -right-2.5 -top-2.5 min-w-[18px] rounded-full bg-slate-900 px-1.5 py-0.5 text-center text-[11px] font-semibold leading-none text-white tabular-nums shadow-sm">
+		                  {unassignedPending.length > 99 ? '99+' : unassignedPending.length}
+		                </div>
+		              ) : null}
+		            </div>
 		          </button>
 
           {startOpen ? (
@@ -964,7 +2030,12 @@ export function CalendarView() {
                   ) : null}
                 </div>
                 <div className="flex items-center gap-2">
-                  <Button onClick={() => newTaskSheet?.openSheet()}>
+                  <Button
+                    onClick={() => {
+                      openTaskAdd()
+                      setStartOpen(false)
+                    }}
+                  >
                     + 일정 추가
                   </Button>
                   <Button
@@ -1017,21 +2088,15 @@ export function CalendarView() {
 	                                  <div className="flex flex-col gap-1 pb-1">
 	                                    {col.map((t) => {
 	                                const sub = subjects.find((s) => s.id === t.subjectId)
-	                                const dday = formatDday(t.dueDate)
 	                                const hasActual = typeof t.actualSeconds === 'number' && Number.isFinite(t.actualSeconds)
-	                                const secondsToShow = hasActual ? (t.actualSeconds as number) : t.plannedSeconds
-                                const timeLabelKo = formatRoundedDurationKoFromSeconds(secondsToShow)
-                                const timeLabelShort = formatRoundedDurationShortFromSeconds(secondsToShow)
-                                const bg = sub?.color ?? '#94a3b8'
-                                const textColor = pickReadableTextColor(bg)
-                                const mobileMetaText = dday ? dday : timeLabelShort
-                                const desktopMetaText = `${timeLabelKo}${dday ? ` ${dday}` : ''}`
-                                const mobileMaxUnits = 14
-                                const desktopMaxUnits = 22
-	                                const titleMaxUnitsMobile = mobileMaxUnits - measureUnits(mobileMetaText) - 1
-	                                const titleMaxUnitsDesktop = desktopMaxUnits - measureUnits(desktopMetaText) - 1
-	                                const titleMobile = truncateToUnits(t.title, titleMaxUnitsMobile)
-	                                const titleDesktop = truncateToUnits(t.title, titleMaxUnitsDesktop)
+	                                const hasAnyRecord = Boolean(t.actualStartTime || t.actualEndTime || hasActual)
+	                                const isCompleted = t.status === 'completed' || hasAnyRecord
+	                                const bg = sub?.color ?? '#94a3b8'
+	                                const textColor = pickReadableTextColor(bg)
+	                                const mobileMaxUnits = 14
+	                                const desktopMaxUnits = 22
+	                                const titleMobile = truncateToUnits(t.title, mobileMaxUnits)
+	                                const titleDesktop = truncateToUnits(t.title, desktopMaxUnits)
 	                                return (
                                   <div
                                     key={t.id}
@@ -1049,8 +2114,14 @@ export function CalendarView() {
                                         e.dataTransfer.effectAllowed = 'move'
                                       }}
                                       onDragEnd={() => setDragOverDate(null)}
-                                      className="box-border block w-full select-none overflow-hidden rounded-[3px] py-1 pl-1.5 pr-10 text-left text-[10px] leading-none hover:brightness-95 active:cursor-grabbing"
-                                      style={{ background: bg, color: textColor }}
+	                                      className={`box-border block w-full select-none overflow-hidden rounded-[3px] py-0.5 pl-1.5 pr-10 text-left text-[10px] leading-none active:cursor-grabbing md:py-1 ${
+	                                        flashTaskId === t.id ? 'emma-flash-3' : ''
+	                                      }`}
+                                      style={{
+                                        background: bg,
+                                        color: textColor,
+                                        filter: isCompleted ? 'saturate(0.85) brightness(0.97)' : undefined,
+                                      }}
                                     >
                                       <span className="min-w-0 overflow-hidden whitespace-nowrap">
                                         <span className="md:hidden">{titleMobile}</span>
@@ -1058,25 +2129,7 @@ export function CalendarView() {
                                       </span>
                                     </button>
 
-                                    <div className="pointer-events-none absolute right-0 top-1/2 -translate-y-1/2 pr-1">
-                                      <span className="tabular-nums text-[9px] leading-none tracking-tighter">
-                                        {!dday ? (
-                                          <span
-                                            className={`bg-white/60 px-1 py-[1px] text-slate-700 md:hidden ${hasActual ? 'font-semibold text-slate-900' : ''}`}
-                                          >
-                                            {timeLabelShort}
-                                          </span>
-                                        ) : null}
-                                        <span
-                                          className={`hidden bg-white/60 px-1 py-[1px] text-slate-700 md:inline ${hasActual ? 'font-semibold text-slate-900' : ''}`}
-                                        >
-                                          {timeLabelKo}
-                                        </span>
-                                        {dday ? (
-                                          <span className="ml-1 bg-white/60 px-1 py-[1px] font-semibold text-indigo-700">{dday}</span>
-                                        ) : null}
-                                      </span>
-                                    </div>
+	                                    {/* meta tags removed */}
                                   </div>
 	                                )
 	                                    })}
@@ -1091,16 +2144,10 @@ export function CalendarView() {
                   </div>
                 </div>
               </div>
-	            </div>
-	          ) : null}
-	        </div>
-
-	        {!startOpen && unassignedPending.length ? (
-	          <span className="pointer-events-none absolute -right-2 -top-2 rounded-full bg-rose-600 px-2 py-0.5 text-[11px] font-semibold text-white tabular-nums">
-	            {unassignedPending.length}
-	          </span>
-	        ) : null}
-	      </div>
+            </div>
+          ) : null}
+          </div>
+        </div>
 	    </div>
-	  );
+	  )
 }

@@ -27,6 +27,10 @@ type PlannerState = {
     dueDate?: string
     plannedStartTime?: string
     plannedSeconds: number
+    actualStartTime?: string
+    actualEndTime?: string
+    actualSeconds?: number
+    recordCompleteOnly?: boolean
     examId?: string
   }) => string
   updateTask: (id: string, patch: Partial<Omit<StudyTask, 'id' | 'createdAt'>>) => void
@@ -49,6 +53,19 @@ function isInvalidTimeRange(startTime?: string, endTime?: string) {
   const e = hmToMinutes(endTime)
   if (s === null || e === null) return false
   return e < s
+}
+
+function computeActualTimesFromPlanned(input: { plannedStartTime?: string; plannedSeconds?: number }) {
+  const plannedStartTime = input.plannedStartTime
+  const plannedSeconds = typeof input.plannedSeconds === 'number' ? input.plannedSeconds : 0
+  if (!plannedStartTime || !Number.isFinite(plannedSeconds) || plannedSeconds <= 0) return null
+  const startMin = hmToMinutes(plannedStartTime)
+  if (startMin === null) return null
+  const endMin = startMin + plannedSeconds / 60
+  const h = Math.floor(endMin / 60) % 24
+  const m = Math.floor(endMin % 60)
+  const endHm = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+  return { actualStartTime: plannedStartTime, actualEndTime: endHm }
 }
 
 function nowIso() {
@@ -113,19 +130,22 @@ export const usePlannerStore = create<PlannerState>()(
           }
           return { exams: nextExams, subjects: nextSubjects, tasks: nextTasks, activeExamId: nextActiveExamId }
         }),
-      addSubject: ({ name, color }) =>
-        set((state) => ({
-          subjects: [
-            ...state.subjects,
-            {
-              id: randomId('sub'),
-              examId: state.activeExamId,
-              name: name.trim() || '새 과목',
-              color,
-              createdAt: nowIso(),
-            },
-          ],
-        })),
+      addSubject: ({ name, color, examId }) =>
+        set((state) => {
+          const resolvedExamId = examId ?? state.activeExamId
+          return {
+            subjects: [
+              ...state.subjects,
+              {
+                id: randomId('sub'),
+                examId: resolvedExamId,
+                name: name.trim() || '새 과목',
+                color,
+                createdAt: nowIso(),
+              },
+            ],
+          }
+        }),
       updateSubject: (id, patch) =>
         set((state) => ({
           subjects: state.subjects.map((s) => (s.id === id ? { ...s, ...patch } : s)),
@@ -135,20 +155,61 @@ export const usePlannerStore = create<PlannerState>()(
           subjects: state.subjects.filter((s) => s.id !== id),
           tasks: state.tasks.filter((t) => t.subjectId !== id),
         })),
-      addTask: ({ subjectId, title, date, dueDate, plannedStartTime, plannedSeconds, examId }) => {
+      addTask: ({
+        subjectId,
+        title,
+        date,
+        dueDate,
+        plannedStartTime,
+        plannedSeconds,
+        actualStartTime,
+        actualEndTime,
+        actualSeconds,
+        recordCompleteOnly,
+        examId,
+      }) => {
         const id = randomId('task')
         const createdAt = nowIso()
         const resolvedExamId = examId ?? get().activeExamId
+        const invalidActualRange = isInvalidTimeRange(actualStartTime, actualEndTime)
+        const resolvedRecordCompleteOnly = Boolean(recordCompleteOnly)
+        const plannedSecondsSafe = Math.max(0, Math.floor(plannedSeconds))
+        const resolvedPlannedStartTime = typeof plannedStartTime === 'string' && plannedStartTime ? plannedStartTime : undefined
+        const impliedActualTimes = resolvedRecordCompleteOnly
+          ? computeActualTimesFromPlanned({ plannedStartTime: resolvedPlannedStartTime, plannedSeconds: plannedSecondsSafe })
+          : null
+        const resolvedActualSeconds = invalidActualRange
+          ? undefined
+          : typeof actualSeconds === 'number'
+            ? Math.max(0, Math.floor(actualSeconds))
+            : computeActualSeconds(impliedActualTimes?.actualStartTime ?? actualStartTime, impliedActualTimes?.actualEndTime ?? actualEndTime)
+        const resolvedStatus = resolvedRecordCompleteOnly
+          ? 'completed'
+          : invalidActualRange
+          ? 'pending'
+          : actualStartTime && actualEndTime
+            ? 'completed'
+            : resolvedActualSeconds !== undefined
+              ? 'completed'
+              : 'pending'
         const task: StudyTask = {
           id,
           examId: resolvedExamId,
           subjectId,
-          title: title.trim() || '새 일정',
+          title: title.trim(),
           date: date ?? '',
           dueDate: typeof dueDate === 'string' && dueDate ? dueDate : undefined,
-          plannedStartTime: typeof plannedStartTime === 'string' && plannedStartTime ? plannedStartTime : undefined,
-          plannedSeconds: Math.max(0, Math.floor(plannedSeconds)),
-          status: 'pending',
+          plannedStartTime: resolvedPlannedStartTime,
+          plannedSeconds: plannedSecondsSafe,
+          actualStartTime: typeof (impliedActualTimes?.actualStartTime ?? actualStartTime) === 'string' && (impliedActualTimes?.actualStartTime ?? actualStartTime)
+            ? (impliedActualTimes?.actualStartTime ?? actualStartTime)
+            : undefined,
+          actualEndTime: typeof (impliedActualTimes?.actualEndTime ?? actualEndTime) === 'string' && (impliedActualTimes?.actualEndTime ?? actualEndTime)
+            ? (impliedActualTimes?.actualEndTime ?? actualEndTime)
+            : undefined,
+          actualSeconds: resolvedRecordCompleteOnly ? undefined : resolvedActualSeconds,
+          recordCompleteOnly: resolvedRecordCompleteOnly,
+          status: resolvedStatus,
           createdAt,
           updatedAt: createdAt,
         }
@@ -168,15 +229,31 @@ export const usePlannerStore = create<PlannerState>()(
             lastUsedSubjectIdByExam: { ...state.lastUsedSubjectIdByExam, [nextExamId]: nextSubjectId },
             tasks: state.tasks.map((t) => {
               if (t.id !== id) return t
-              const next = { ...t, ...patch, updatedAt: nowIso() }
+              const baseNext = { ...t, ...patch, updatedAt: nowIso() }
+              const recordCompleteOnly = Boolean(baseNext.recordCompleteOnly)
+              const impliedActualTimes = recordCompleteOnly
+                ? computeActualTimesFromPlanned({ plannedStartTime: baseNext.plannedStartTime, plannedSeconds: baseNext.plannedSeconds })
+                : null
+              const next = impliedActualTimes
+                ? {
+                    ...baseNext,
+                    actualStartTime: impliedActualTimes.actualStartTime,
+                    actualEndTime: impliedActualTimes.actualEndTime,
+                    actualSeconds: undefined,
+                  }
+                : baseNext
               const invalidActualRange = isInvalidTimeRange(next.actualStartTime, next.actualEndTime)
-              const actualSeconds = invalidActualRange
+              const actualSeconds = recordCompleteOnly
                 ? undefined
-                : patch.actualSeconds !== undefined
-                  ? patch.actualSeconds
-                  : computeActualSeconds(next.actualStartTime, next.actualEndTime)
+                : invalidActualRange
+                  ? undefined
+                  : patch.actualSeconds !== undefined
+                    ? patch.actualSeconds
+                    : computeActualSeconds(next.actualStartTime, next.actualEndTime)
               const status =
-                invalidActualRange
+                recordCompleteOnly
+                  ? 'completed'
+                  : invalidActualRange
                   ? 'pending'
                   : next.actualStartTime && next.actualEndTime
                     ? 'completed'
@@ -191,10 +268,17 @@ export const usePlannerStore = create<PlannerState>()(
     }),
     {
       name: 'emma-study-planner:v1',
-      version: 7,
+      version: 8,
       migrate: (persisted: any, fromVersion) => {
         if (!persisted || typeof persisted !== 'object') return seed()
-        if (fromVersion >= 7) return persisted
+        if (fromVersion >= 8) return persisted
+
+        if (fromVersion === 7) {
+          const tasks = Array.isArray(persisted.tasks)
+            ? persisted.tasks.map((t: any) => ({ ...t, recordCompleteOnly: Boolean(t.recordCompleteOnly) }))
+            : []
+          return { ...persisted, tasks }
+        }
 
         if (fromVersion === 6) {
           return { ...persisted, lastUsedSubjectIdByExam: {} }
@@ -230,13 +314,14 @@ export const usePlannerStore = create<PlannerState>()(
         }
 
         if (fromVersion === 4) {
-          // v4 -> v5: 목표/기록 시간 필드 분리
+          // v4 -> v5: 계획/완료 시간 필드 분리
           const tasks = Array.isArray(persisted.tasks)
             ? persisted.tasks.map((t: any) => ({
                 ...t,
                 plannedStartTime: typeof t.plannedStartTime === 'string' ? t.plannedStartTime : undefined,
                 actualStartTime: typeof t.actualStartTime === 'string' ? t.actualStartTime : typeof t.startTime === 'string' ? t.startTime : undefined,
                 actualEndTime: typeof t.actualEndTime === 'string' ? t.actualEndTime : typeof t.endTime === 'string' ? t.endTime : undefined,
+                recordCompleteOnly: Boolean((t as any).recordCompleteOnly),
               }))
             : []
           return { ...persisted, tasks }
@@ -307,6 +392,7 @@ export const usePlannerStore = create<PlannerState>()(
               plannedStartTime: typeof t.plannedStartTime === 'string' ? t.plannedStartTime : undefined,
               actualStartTime: typeof t.actualStartTime === 'string' ? t.actualStartTime : typeof t.startTime === 'string' ? t.startTime : undefined,
               actualEndTime: typeof t.actualEndTime === 'string' ? t.actualEndTime : typeof t.endTime === 'string' ? t.endTime : undefined,
+              recordCompleteOnly: Boolean((t as any).recordCompleteOnly),
               actualSeconds:
                 typeof t.actualSeconds === 'number'
                   ? t.actualSeconds

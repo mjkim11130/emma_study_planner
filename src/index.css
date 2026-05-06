@@ -7,7 +7,10 @@ body,
 }
 
 body {
+  overflow: hidden; /* prevent page scroll; allow only internal scroll containers */
   margin: 0;
+  -webkit-user-select: none;
+  user-select: none;
   font-family:
     ui-sans-serif,
     system-ui,
@@ -22,9 +25,25 @@ body {
   color: rgb(15 23 42);
 }
 
+/* Allow selection where user needs to edit/copy. */
+input,
+textarea,
+select,
+[contenteditable='true'],
+[contenteditable=''],
+[data-allow-select='true'] {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
 /* iOS overscroll(바운스)에서 상단에 비어보이는 영역 색상을 맞춤 */
 html {
   background: rgb(248 250 252);
+  overscroll-behavior: none;
+}
+
+#root {
+  overflow: hidden;
 }
 
 * {
@@ -36,4 +55,40 @@ html {
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   overflow: hidden;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none; /* IE/Edge */
+  scrollbar-width: none; /* Firefox */
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none; /* Chrome/Safari */
+}
+
+@keyframes emmaFlash {
+  0%,
+  100% {
+    filter: brightness(1);
+  }
+  50% {
+    filter: brightness(1.25);
+  }
+}
+
+.emma-flash-3 {
+  animation: emmaFlash 440ms ease-in-out 0s 3;
+}
+
+@keyframes taskTimerFillBlink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.42;
+  }
+}
+
+.task-timer-fill-blink {
+  animation: taskTimerFillBlink 520ms ease-in-out infinite;
 }

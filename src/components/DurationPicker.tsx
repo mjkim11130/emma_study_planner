@@ -19,34 +19,36 @@ type DurationPickerProps = {
   valueSeconds: number
   onChangeSeconds: (nextSeconds: number) => void
   maxHours?: number
-  minuteStep?: number
   buttonClassName?: string
   buttonLabel?: string
   ariaLabel?: string
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
 }
 
 export function DurationPickerButton({
   valueSeconds,
   onChangeSeconds,
   maxHours = 10,
-  minuteStep = 5,
   buttonClassName,
   buttonLabel,
   ariaLabel,
+  open: openProp,
+  onOpenChange,
 }: DurationPickerProps) {
-  const [open, setOpen] = useState(false)
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false)
+  const open = typeof openProp === 'boolean' ? openProp : uncontrolledOpen
+  const setOpen = (next: boolean) => {
+    if (typeof openProp !== 'boolean') setUncontrolledOpen(next)
+    onOpenChange?.(next)
+  }
 
   const hours = Math.floor(Math.max(0, valueSeconds) / 3600)
   const minutes = Math.floor((Math.max(0, valueSeconds) % 3600) / 60)
 
   const initialHour = clampInt(hours, 0, maxHours)
-  const step = useMemo(() => clampInt(minuteStep, 1, 60), [minuteStep])
-  const initialMinute = useMemo(() => {
-    const raw = clampInt(minutes, 0, 59)
-    const snapped = clampInt(Math.round(raw / step) * step, 0, 60 - step)
-    return snapped
-  }, [minutes, step])
-  const minuteCount = useMemo(() => Math.max(1, Math.floor(60 / step)), [step])
+  const initialMinute = useMemo(() => clampInt(minutes, 0, 59), [minutes])
+  const minuteCount = 60
 
   const [draftHour, setDraftHour] = useState(initialHour)
   const [draftMinute, setDraftMinute] = useState(initialMinute)
@@ -64,7 +66,7 @@ export function DurationPickerButton({
     window.setTimeout(() => {
       const itemH = 44
       hourListRef.current?.scrollTo({ top: initialHour * itemH, behavior: 'instant' as ScrollBehavior })
-      minuteListRef.current?.scrollTo({ top: (initialMinute / step) * itemH, behavior: 'instant' as ScrollBehavior })
+      minuteListRef.current?.scrollTo({ top: initialMinute * itemH, behavior: 'instant' as ScrollBehavior })
     }, 0)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
@@ -77,17 +79,6 @@ export function DurationPickerButton({
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [open])
-
-  const snapToPicker = () => {
-    const h = clampInt(draftHour, 0, maxHours)
-    const mRaw = clampInt(draftMinute, 0, 59)
-    const snapped = clampInt(Math.round(mRaw / step) * step, 0, 60 - step)
-    setDraftHour(h)
-    setDraftMinute(snapped)
-    const itemH = 44
-    hourListRef.current?.scrollTo({ top: h * itemH, behavior: 'smooth' })
-    minuteListRef.current?.scrollTo({ top: (snapped / step) * itemH, behavior: 'smooth' })
-  }
 
   useEffect(() => {
     if (!open) return
@@ -158,9 +149,19 @@ export function DurationPickerButton({
                         onWheel={(e) => e.stopPropagation()}
                       >
                         {Array.from({ length: maxHours + 1 }, (_, h) => h).map((h) => (
-                          <div key={h} className="flex h-11 snap-center items-center justify-center text-base font-semibold text-slate-900">
+                          <button
+                            key={h}
+                            type="button"
+                            onClick={() => {
+                              setDraftHour(h)
+                              const itemH = 44
+                              hourListRef.current?.scrollTo({ top: h * itemH, behavior: 'smooth' })
+                            }}
+                            className="flex h-11 w-full snap-center items-center justify-center text-base font-semibold text-slate-900"
+                            aria-label={`${h}시간 선택`}
+                          >
                             {h}시간
-                          </div>
+                          </button>
                         ))}
                       </div>
                     </div>
@@ -170,21 +171,28 @@ export function DurationPickerButton({
                       <div
                         ref={minuteListRef}
                         className="h-56 snap-y snap-mandatory overflow-y-auto overscroll-contain py-[88px] scroll-smooth"
-                        onScroll={(e) => {
+                      onScroll={(e) => {
                           const el = e.currentTarget
                           const itemH = 44
                           const idx = clampInt(Math.round(el.scrollTop / itemH), 0, minuteCount - 1)
-                          const next = idx * step
-                          if (next !== draftMinute) setDraftMinute(next)
+                          if (idx !== draftMinute) setDraftMinute(idx)
                         }}
                         onWheel={(e) => e.stopPropagation()}
                       >
-                        {Array.from({ length: minuteCount }, (_, i) => i * step)
-                          .filter((m) => m >= 0 && m < 60)
-                          .map((m) => (
-                            <div key={m} className="flex h-11 snap-center items-center justify-center text-base font-semibold text-slate-900">
+                        {Array.from({ length: minuteCount }, (_, m) => m).map((m) => (
+                            <button
+                              key={m}
+                              type="button"
+                              onClick={() => {
+                                setDraftMinute(m)
+                                const itemH = 44
+                                minuteListRef.current?.scrollTo({ top: m * itemH, behavior: 'smooth' })
+                              }}
+                              className="flex h-11 w-full snap-center items-center justify-center text-base font-medium text-slate-900"
+                              aria-label={`${pad2(m)}분 선택`}
+                            >
                               {pad2(m)}분
-                            </div>
+                            </button>
                           ))}
                       </div>
                     </div>
@@ -200,15 +208,14 @@ export function DurationPickerButton({
                         type="button"
                         onClick={() => {
                           const cur = clampInt(draftHour, 0, maxHours) * 3600 + clampInt(draftMinute, 0, 59) * 60
-                          const next = Math.max(0, cur + q.delta)
+                          const next = Math.max(0, Math.min(maxHours * 3600 + 59 * 60, cur + q.delta))
                           const nextH = clampInt(Math.floor(next / 3600), 0, maxHours)
                           const nextM = clampInt(Math.floor((next % 3600) / 60), 0, 59)
-                          const snappedM = clampInt(Math.round(nextM / step) * step, 0, 60 - step)
                           setDraftHour(nextH)
-                          setDraftMinute(snappedM)
+                          setDraftMinute(nextM)
                           const itemH = 44
                           hourListRef.current?.scrollTo({ top: nextH * itemH, behavior: 'smooth' })
-                          minuteListRef.current?.scrollTo({ top: (snappedM / step) * itemH, behavior: 'smooth' })
+                          minuteListRef.current?.scrollTo({ top: nextM * itemH, behavior: 'smooth' })
                         }}
                         className="rounded-xl bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-200"
                       >
@@ -222,7 +229,6 @@ export function DurationPickerButton({
                   <button
                     type="button"
                     onClick={() => {
-                      snapToPicker()
                       setOpen(false)
                     }}
                     className="w-full rounded-2xl bg-slate-900 px-4 py-3.5 text-base font-semibold text-white transition hover:bg-slate-800"

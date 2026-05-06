@@ -59,7 +59,7 @@ export function ExamDetailView() {
               className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-400"
             />
             <div className="mt-2 grid grid-cols-2 gap-2">
-              <Stat label="총 목표" value={formatHmsFromSeconds(stats.totalPlanned)} />
+              <Stat label="총 계획" value={formatHmsFromSeconds(stats.totalPlanned)} />
               <Stat label="총 실제" value={formatHmsFromSeconds(stats.totalActual)} />
               <Stat
                 label="차이"
