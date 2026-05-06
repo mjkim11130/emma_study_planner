@@ -975,7 +975,7 @@ export function DayDetailView() {
 
       <TimePickerModal
         open={timelineTimePickerOpen}
-        title={timelineTimePickerField === 'end' ? '보이는 종료' : '보이는 시작'}
+        title={timelineTimePickerField === 'end' ? '종료' : '시작'}
         initialHm={timelineTimePickerField === 'end' ? minutesToHm(timelineWindow.endMin) : minutesToHm(timelineWindow.startMin)}
         stepMinutes={10}
         validate={(hm) => {
@@ -1701,7 +1701,7 @@ function DayTimeline({
           aria-label="타임라인 시작 조절"
         >
           <div className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 rounded-full bg-white/85 px-2 py-0.5 text-[11px] font-semibold tabular-nums text-slate-700 shadow-sm ring-1 ring-black/5">
-            {minutesToHm(startMin)}
+            {formatMeridiemHm(minutesToHm(startMin)) ?? minutesToHm(startMin)}
           </div>
           <div className="h-1.5 w-10 rounded-full bg-slate-300" />
         </div>
@@ -1714,7 +1714,7 @@ function DayTimeline({
           aria-label="타임라인 종료 조절"
         >
           <div className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 rounded-full bg-white/85 px-2 py-0.5 text-[11px] font-semibold tabular-nums text-slate-700 shadow-sm ring-1 ring-black/5">
-            {minutesToHm(endMin)}
+            {formatMeridiemHm(minutesToHm(endMin)) ?? minutesToHm(endMin)}
           </div>
           <div className="h-1.5 w-10 rounded-full bg-slate-300" />
         </div>

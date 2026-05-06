@@ -676,28 +676,39 @@ function SubjectCard({
     const shown = isCollapsed ? [] : items
     return (
       <div className={limit == null ? 'bg-white' : ''}>
-        <div className="flex items-center justify-between">
-          <div className={`text-[12px] font-semibold ${tone === 'completed' ? 'text-slate-900' : tone === 'planned' ? 'text-slate-700' : 'text-slate-500'}`}>
+        <button
+          type="button"
+          className="flex w-full items-center justify-between gap-3 py-2"
+          aria-label={isCollapsed ? `${title} 열기` : `${title} 닫기`}
+          onClick={(e) => {
+            e.stopPropagation()
+            setCollapsed((prev) => ({ ...prev, [sectionKey]: !prev[sectionKey] }))
+          }}
+        >
+          <div
+            className={`text-[12px] font-semibold ${
+              tone === 'completed' ? 'text-slate-900' : tone === 'planned' ? 'text-slate-700' : 'text-slate-500'
+            }`}
+          >
             {title} {items.length ? <span className="ml-1 text-slate-400">({items.length})</span> : null}
           </div>
-          <button
-            type="button"
-            className="ml-2 inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-            aria-label={isCollapsed ? `${title} 열기` : `${title} 닫기`}
-            onClick={(e) => {
-              e.stopPropagation()
-              setCollapsed((prev) => ({ ...prev, [sectionKey]: !prev[sectionKey] }))
-            }}
-          >
+          <span className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700">
             <svg
               viewBox="0 0 20 20"
               className={`h-4 w-4 transition-transform ${isCollapsed ? '' : 'rotate-180'}`}
               aria-hidden="true"
             >
-              <path d="M5.5 7.5L10 12l4.5-4.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              <path
+                d="M5.5 7.5L10 12l4.5-4.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
             </svg>
-          </button>
-        </div>
+          </span>
+        </button>
         {isCollapsed ? null : (
           <div className="divide-y divide-slate-200">
             {shown.map((t) => (
@@ -979,6 +990,28 @@ export function SubjectDashboardView() {
     }
   }, [period, scopedSubjects, tasksBySubject])
 
+  const completedLegend = useMemo(() => {
+    if (!aggregate?.completedBySubject?.length) return []
+    const subjectNameById = new Map(scopedSubjects.map((s) => [s.id, s.name] as const))
+    const total = Math.max(aggregate.completedSecondsCompletedOnly, 1)
+    const sorted = aggregate.completedBySubject
+      .slice()
+      .sort((a, b) => b.seconds - a.seconds)
+      .map((seg) => ({
+        subjectId: seg.subjectId,
+        name: subjectNameById.get(seg.subjectId) ?? '주제',
+        color: seg.color,
+        share: seg.seconds / total,
+      }))
+    const keep: typeof sorted = []
+    for (const seg of sorted) {
+      if (keep.length >= 3) break
+      if (seg.share < 0.12 && keep.length > 0) continue
+      keep.push(seg)
+    }
+    return keep
+  }, [aggregate, scopedSubjects])
+
   const visibleSubjects = useMemo(() => {
     const wantArchived = period === 'archive'
     const scoped = scopedSubjects.filter((s) => (wantArchived ? Boolean(s.archived) : !s.archived))
@@ -1170,25 +1203,39 @@ export function SubjectDashboardView() {
                       </div>
                       <div className="grid grid-cols-[40px_minmax(0,1fr)_auto] items-center gap-2">
                         <span className="text-sm font-semibold text-slate-900">완료</span>
-                        <div className="h-1.5 w-full overflow-hidden rounded-full bg-transparent">
-                          <div className="h-full overflow-hidden rounded-full" style={{ width: `${aggregate.completedPct}%` }}>
-                            <div className="flex h-full w-full overflow-hidden rounded-full">
-                              {aggregate.completedBySubject.length ? (
-                                aggregate.completedBySubject.map((seg) => (
-                                  <div
-                                    key={seg.subjectId}
-                                    className="h-full"
-                                  style={{
-                                    background: seg.color,
-                                    opacity: 0.55,
-                                    width: `${(seg.seconds / Math.max(aggregate.completedSecondsCompletedOnly, 1)) * 100}%`,
-                                    minWidth: seg.seconds > 0 ? 1 : undefined,
-                                  }}
-                                />
-                                ))
-                              ) : null}
+                        <div className="flex min-w-0 flex-col">
+                          <div className="h-1.5 w-full overflow-hidden rounded-full bg-transparent">
+                            <div className="h-full overflow-hidden rounded-full" style={{ width: `${aggregate.completedPct}%` }}>
+                              <div className="flex h-full w-full overflow-hidden rounded-full">
+                                {aggregate.completedBySubject.length ? (
+                                  aggregate.completedBySubject.map((seg) => (
+                                    <div
+                                      key={seg.subjectId}
+                                      className="h-full"
+                                      style={{
+                                        background: seg.color,
+                                        width: `${(seg.seconds / Math.max(aggregate.completedSecondsCompletedOnly, 1)) * 100}%`,
+                                        minWidth: seg.seconds > 0 ? 1 : undefined,
+                                      }}
+                                    />
+                                  ))
+                                ) : null}
+                              </div>
                             </div>
                           </div>
+                          {completedLegend.length ? (
+                            <div className="mt-2 flex min-w-0 flex-wrap items-center gap-1.5">
+                              {completedLegend.map((seg) => (
+                                <span
+                                  key={seg.subjectId}
+                                  className="inline-flex items-center gap-1 rounded-full bg-slate-50 px-2 py-0.5 text-[10px] font-semibold text-slate-700 ring-1 ring-slate-200"
+                                >
+                                  <span className="h-1.5 w-1.5 rounded-full" style={{ background: seg.color }} aria-hidden="true" />
+                                  {seg.name}
+                                </span>
+                              ))}
+                            </div>
+                          ) : null}
                         </div>
                         <span className="ml-2 text-right text-[15px] font-semibold tabular-nums text-slate-900">
                           {formatDurationKo(aggregate.completedSecondsCompletedOnly)}

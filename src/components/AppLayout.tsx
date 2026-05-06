@@ -221,7 +221,7 @@ export function AppLayout() {
         <div className="h-full [--bottom-nav-h:72px]">
           <div className={`grid h-full w-full grid-cols-1 ${sidebarOpen ? 'md:grid-cols-[260px_1fr]' : 'md:grid-cols-[1fr]'}`}>
             <aside className={`${sidebarOpen ? 'md:flex' : 'md:hidden'} hidden border-r border-slate-200 bg-white p-3 md:min-h-0 md:flex-col`}>
-            <div className="px-2 py-2 text-sm font-semibold text-slate-900">엠마 스터디플래너</div>
+            <div className="px-2 py-2 text-sm font-semibold text-slate-900" />
             <div className="mt-3 flex flex-col gap-1.5">
               <NavItem to="calendar" label="월별" icon={<IconCalendarMonth />} />
               <NavItem to={`/day/${todayYmd()}`} label="일별" icon={<IconCalendarViewDay />} active={isDayPage} />
