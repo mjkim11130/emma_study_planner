@@ -45,8 +45,8 @@ function mixHex(a: string, b: string, t: number) {
   return `#${[r, g, bl].map((x) => x.toString(16).padStart(2, '0')).join('')}`
 }
 
-function mutedSubjectColor(color: string) {
-  return mixHex(color, '#64748b', 0.45)
+function deepSubjectColor(color: string) {
+  return mixHex(color, '#0f172a', 0.28)
 }
 
 function MasonryGrid({
@@ -351,30 +351,6 @@ function formatDurationKo(totalSeconds: number) {
   if (h > 0 && m > 0) return `${h}시간 ${m}분`
   if (h > 0) return `${h}시간`
   return `${m}분`
-}
-
-function normalizeHex(color: string) {
-  const raw = color.trim()
-  const hex = raw.startsWith('#') ? raw.slice(1) : raw
-  if (/^[0-9a-fA-F]{3}$/.test(hex)) return `#${hex[0]}${hex[0]}${hex[1]}${hex[1]}${hex[2]}${hex[2]}`.toLowerCase()
-  if (/^[0-9a-fA-F]{6}$/.test(hex)) return `#${hex}`.toLowerCase()
-  return raw
-}
-
-function pickReadableTextColor(bg: string) {
-  const hex = normalizeHex(bg)
-  const m = /^#([0-9a-f]{6})$/i.exec(hex)
-  if (!m) return '#0f172a'
-  const v = m[1]
-  const r = parseInt(v.slice(0, 2), 16)
-  const g = parseInt(v.slice(2, 4), 16)
-  const b = parseInt(v.slice(4, 6), 16)
-  const srgb = [r, g, b].map((x) => {
-    const c = x / 255
-    return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)
-  })
-  const L = 0.2126 * srgb[0] + 0.7152 * srgb[1] + 0.0722 * srgb[2]
-  return L < 0.45 ? '#ffffff' : '#0f172a'
 }
 
 function formatPeriodLabel(period: Period) {
@@ -805,7 +781,7 @@ function SubjectCard({
               <div className="grid grid-cols-[40px_minmax(0,1fr)_auto] items-center gap-2">
                 <span className="text-sm font-semibold text-slate-900">완료</span>
                 <div className="h-1.5 w-full overflow-hidden rounded-full">
-                  <div className="h-full rounded-full bg-slate-900" style={{ width: `${completedPct}%` }} />
+                  <div className="h-full rounded-full" style={{ width: `${completedPct}%`, background: deepSubjectColor(subject.color) }} />
                 </div>
                 <span className="ml-2 text-right text-[15px] font-semibold tabular-nums text-slate-900">
                   {formatDurationKo(completedSecondsCompletedOnly)}
@@ -852,7 +828,7 @@ function SubjectCard({
           type="button"
           onClick={onAddTask}
           className="inline-flex h-10 flex-1 items-center justify-center rounded-xl px-4 text-sm font-semibold transition hover:opacity-90"
-          style={{ background: mutedSubjectColor(subject.color), color: pickReadableTextColor(mutedSubjectColor(subject.color)) }}
+          style={{ background: '#0f172a', color: '#ffffff' }}
         >
           + 일정 추가
         </button>
@@ -1236,7 +1212,7 @@ export function SubjectDashboardView() {
                                     key={seg.subjectId}
                                     className="h-full"
                                   style={{
-                                    background: mutedSubjectColor(seg.color),
+                                    background: seg.color,
                                     opacity: 0.55,
                                     width: `${(seg.seconds / Math.max(aggregate.completedSecondsCompletedOnly, 1)) * 100}%`,
                                     minWidth: seg.seconds > 0 ? 1 : undefined,
