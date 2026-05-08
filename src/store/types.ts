@@ -12,6 +12,7 @@ export type Subject = {
   name: string
   color: string
   archived?: boolean
+  isRest?: boolean
   createdAt: string
 }
 

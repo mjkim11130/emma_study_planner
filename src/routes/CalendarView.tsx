@@ -38,15 +38,10 @@ import { buildTimeSummaryNode, formatDurationPreciseKo } from '../lib/taskTimeSu
 
 function StartPendingBubbleIcon() {
   return (
-    <svg viewBox="0 0 64 64" aria-hidden="true" className="h-8 w-8 text-slate-800">
-      <rect x="10" y="10" width="44" height="44" rx="10" fill="#e8f1fb" />
+    <svg viewBox="0 -960 960 960" aria-hidden="true" className="h-8 w-8 text-slate-800">
       <path
-        d="M20 24h24M20 32h24M20 40h24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="4"
-        strokeLinecap="round"
-        strokeLinejoin="round"
+        d="m388-212-56-56 92-92-92-92 56-56 92 92 92-92 56 56-92 92 92 92-56 56-92-92-92 92ZM200-80q-33 0-56.5-23.5T120-160v-560q0-33 23.5-56.5T200-800h40v-80h80v80h320v-80h80v80h40q33 0 56.5 23.5T840-720v560q0 33-23.5 56.5T760-80H200Zm0-80h560v-400H200v400Z"
+        fill="currentColor"
       />
     </svg>
   )
@@ -74,6 +69,12 @@ function hmToMinutes(hm?: string | null) {
   if (hours24 < 0 || hours24 > 23) return null
   if (minutes < 0 || minutes > 59) return null
   return hours24 * 60 + minutes
+}
+
+function diffMinutesAllowNextDay(startMin: number, endMin: number) {
+  if (endMin === startMin) return { minutes: 0, wraps: false }
+  if (endMin > startMin) return { minutes: endMin - startMin, wraps: false }
+  return { minutes: endMin + 24 * 60 - startMin, wraps: true }
 }
 
 function addSecondsToHm(hm: string, secondsToAdd: number) {
@@ -167,7 +168,7 @@ function CompareRail({
       <div className="grid grid-cols-[46px_minmax(0,1fr)_98px] items-center gap-3">
         <span className="text-sm font-semibold text-slate-900">완료</span>
         <div className="h-3.5 overflow-hidden">
-          <div className="h-full rounded-full bg-slate-900" style={{ width: actualWidth }} />
+          <div className="h-full rounded-full bg-black/80" style={{ width: actualWidth }} />
         </div>
         <span className="text-right text-[15px] font-semibold tabular-nums text-slate-900">{actualLabel}</span>
       </div>
@@ -197,11 +198,14 @@ export function CalendarView() {
   const [datePickerField, setDatePickerField] = useState<null | 'date' | 'dueDate'>(null)
   const [calendarMonth, setCalendarMonth] = useState(() => startOfMonth(new Date()))
   const [timePickerOpen, setTimePickerOpen] = useState(false)
-  const [timePickerField, setTimePickerField] = useState<null | 'plannedStartTime' | 'actualStartTime' | 'actualEndTime'>(null)
+  const [timePickerField, setTimePickerField] = useState<
+    null | 'plannedStartTime' | 'plannedEndTime' | 'actualStartTime' | 'actualEndTime'
+  >(null)
   const [plannedDurationPickerOpen, setPlannedDurationPickerOpen] = useState(false)
   const [plannedSecondsDraft, setPlannedSecondsDraft] = useState(0)
   const [editValidationMessage, setEditValidationMessage] = useState<string | null>(null)
   const [editExitConfirmOpen, setEditExitConfirmOpen] = useState(false)
+  const [editWarningMessage, setEditWarningMessage] = useState<string | null>(null)
   const [editTitleDraft, setEditTitleDraft] = useState('')
   const [editTitleSample, setEditTitleSample] = useState('제목 추가')
   const editTitleOriginalRef = useRef<{ taskId: string; title: string } | null>(null)
@@ -217,6 +221,27 @@ export function CalendarView() {
   const [autoCloseAfterCompleteTaskId, setAutoCloseAfterCompleteTaskId] = useState<string | null>(null)
   const [flashTaskId, setFlashTaskId] = useState<string | null>(null)
   const scrollAnimRef = useRef<number | null>(null)
+  const [longPressWeekStartYmd, setLongPressWeekStartYmd] = useState<string | null>(null)
+  const [pressedDayYmd, setPressedDayYmd] = useState<string | null>(null)
+  const longPressRef = useRef<{
+    timer: number | null
+    firedAt: number
+    weekStartYmd: string | null
+    dayYmd: string | null
+    armed: boolean
+    startX: number
+    startY: number
+    moved: boolean
+  }>({
+    timer: null,
+    firedAt: 0,
+    weekStartYmd: null,
+    dayYmd: null,
+    armed: false,
+    startX: 0,
+    startY: 0,
+    moved: false,
+  })
   const dragRef = useRef<{
     isDragging: boolean
     startX: number
@@ -293,8 +318,8 @@ export function CalendarView() {
   const [dragOverDate, setDragOverDate] = useState<string | null>(null)
   const buildMonthWeeks = (month: string) => {
     const monthStart = parseISO(`${month}-01`)
-    const gridStart = startOfWeek(monthStart, { weekStartsOn: 0 })
-    const gridEnd = endOfWeek(endOfMonth(monthStart), { weekStartsOn: 0 })
+    const gridStart = startOfWeek(monthStart, { weekStartsOn: 1 })
+    const gridEnd = endOfWeek(endOfMonth(monthStart), { weekStartsOn: 1 })
     const list: string[] = []
     for (let d = gridStart; d <= gridEnd; d = addDays(d, 7)) list.push(format(d, 'yyyy-MM-dd'))
     return list
@@ -782,23 +807,19 @@ export function CalendarView() {
     const calc = () => {
       const tasksH = tasksEl.getBoundingClientRect().height
       const taskRowH = taskRowEl.getBoundingClientRect().height
-      const moreRowH = moreRowEl.getBoundingClientRect().height
-
       if (!Number.isFinite(tasksH) || !Number.isFinite(taskRowH) || tasksH <= 0 || taskRowH <= 0) {
         setMonthCellMaxTasks(4)
         return
       }
 
+      // `divide-y` adds a 1px border between rows; include it to avoid overestimating.
+      const dividerPx = 1
+      const effectiveRowH = taskRowH + dividerPx
       // Allow a tiny epsilon to reduce off-by-1 due to subpixel rounding.
       const epsilon = 0.75
-      const maxLines = Math.floor((tasksH + epsilon) / taskRowH)
-
-      // If the "+N" row is taller than a task row (can happen on some fonts), reserve by its height.
-      // We still reserve only one line visually, but this avoids choosing a count that makes "+N" clip.
-      const needsMoreReserve = moreRowH > taskRowH + 0.5
-      const adjusted = needsMoreReserve ? Math.max(0, maxLines - 1) : maxLines
-
-      setMonthCellMaxTasks(clamp(adjusted, 0, 6))
+      const maxLines = Math.floor((tasksH + epsilon) / effectiveRowH)
+      // Let it grow with available height (mobile tall screens can show many).
+      setMonthCellMaxTasks(clamp(maxLines, 0, 30))
     }
 
     calc()
@@ -890,6 +911,13 @@ export function CalendarView() {
             const cellTasks = (tasksByDate.get(ymd) ?? [])
               .slice()
               .sort((a, b) => {
+                const aHasActual = typeof a.actualSeconds === 'number' && Number.isFinite(a.actualSeconds)
+                const bHasActual = typeof b.actualSeconds === 'number' && Number.isFinite(b.actualSeconds)
+                const aHasAnyRecord = Boolean(a.actualStartTime || a.actualEndTime || aHasActual)
+                const bHasAnyRecord = Boolean(b.actualStartTime || b.actualEndTime || bHasActual)
+                const aCompleted = a.status === 'completed' || aHasAnyRecord
+                const bCompleted = b.status === 'completed' || bHasAnyRecord
+                if (aCompleted !== bCompleted) return aCompleted ? 1 : -1
                 const aStart = hmToMinutes(a.actualStartTime ?? a.plannedStartTime ?? null)
                 const bStart = hmToMinutes(b.actualStartTime ?? b.plannedStartTime ?? null)
 
@@ -899,10 +927,12 @@ export function CalendarView() {
                 return a.createdAt.localeCompare(b.createdAt)
               })
             const isProbe = idx === 0
+            const weekStartYmd = format(startOfWeek(parseISO(ymd), { weekStartsOn: 1 }), 'yyyy-MM-dd')
+            const isWeekHighlighted = Boolean(longPressWeekStartYmd && weekStartYmd === longPressWeekStartYmd)
+            const weekDayIdxRaw = getDay(parseISO(ymd)) // 0=Sun ... 6=Sat
+            const weekDayIdx = (weekDayIdxRaw + 6) % 7 // 0=Mon ... 6=Sun
             const maxLines = monthCellMaxTasks
-            // If we need a "+N" line, reserve exactly 1 line for it.
-            const visibleCount = cellTasks.length > maxLines ? Math.max(0, maxLines - 1) : maxLines
-            const visible = cellTasks.slice(0, visibleCount)
+            const visible = cellTasks.slice(0, maxLines)
             const more = cellTasks.length - visible.length
 
             return (
@@ -911,9 +941,81 @@ export function CalendarView() {
                 data-month-day-cell="true"
                 role="button"
                 tabIndex={0}
-                onClick={() => navigate(`/day/${ymd}`)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' || e.key === ' ') navigate(`/day/${ymd}`)
+                }}
+                onPointerDown={(e) => {
+                  if ((e.target as HTMLElement | null)?.closest('button')) return
+                  if (longPressRef.current.timer) window.clearTimeout(longPressRef.current.timer)
+                  longPressRef.current.armed = false
+                  longPressRef.current.moved = false
+                  longPressRef.current.startX = e.clientX
+                  longPressRef.current.startY = e.clientY
+                  longPressRef.current.weekStartYmd = weekStartYmd
+                  longPressRef.current.dayYmd = ymd
+                  setPressedDayYmd(ymd)
+                  setLongPressWeekStartYmd(null)
+                  try {
+                    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+                  } catch {
+                    // ignore
+                  }
+                  longPressRef.current.timer = window.setTimeout(() => {
+                    if (longPressRef.current.moved) return
+                    longPressRef.current.firedAt = Date.now()
+                    longPressRef.current.timer = null
+                    longPressRef.current.armed = true
+                    setLongPressWeekStartYmd(weekStartYmd)
+                  }, 420)
+                }}
+                onPointerMove={(e) => {
+                  if (!pressedDayYmd) return
+                  const dx = e.clientX - longPressRef.current.startX
+                  const dy = e.clientY - longPressRef.current.startY
+                  if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return
+                  longPressRef.current.moved = true
+                  if (longPressRef.current.timer) window.clearTimeout(longPressRef.current.timer)
+                  longPressRef.current.timer = null
+                  longPressRef.current.armed = false
+                  longPressRef.current.weekStartYmd = null
+                  longPressRef.current.dayYmd = null
+                  setLongPressWeekStartYmd(null)
+                  setPressedDayYmd(null)
+                }}
+                onPointerUp={(e) => {
+                  if (longPressRef.current.timer) window.clearTimeout(longPressRef.current.timer)
+                  longPressRef.current.timer = null
+                  const armed = longPressRef.current.armed
+                  const w = longPressRef.current.weekStartYmd
+                  const d = longPressRef.current.dayYmd
+                  const moved = longPressRef.current.moved
+                  longPressRef.current.armed = false
+                  longPressRef.current.moved = false
+                  longPressRef.current.weekStartYmd = null
+                  longPressRef.current.dayYmd = null
+                  setLongPressWeekStartYmd(null)
+                  setPressedDayYmd(null)
+                  if (moved) return
+                  if (!d) return
+                  if (Date.now() - (longPressRef.current.firedAt || 0) < 200) {
+                    // ignore stray click after long-press timer
+                  }
+                  if (armed && w) {
+                    navigate(`/week?weekStart=${encodeURIComponent(w)}`)
+                    return
+                  }
+                  // short press: go to day
+                  if ((e.target as HTMLElement | null)?.closest('button')) return
+                  navigate(`/day/${d}`)
+                }}
+                onPointerCancel={() => {
+                  if (longPressRef.current.timer) window.clearTimeout(longPressRef.current.timer)
+                  longPressRef.current.timer = null
+                  longPressRef.current.armed = false
+                  longPressRef.current.weekStartYmd = null
+                  longPressRef.current.dayYmd = null
+                  setLongPressWeekStartYmd(null)
+                  setPressedDayYmd(null)
                 }}
                 onDragOver={(e) => {
                   e.preventDefault()
@@ -937,8 +1039,21 @@ export function CalendarView() {
                 {dragOverDate === ymd ? (
                   <div className="pointer-events-none absolute inset-0 z-0 rounded-[2px] border-2 border-slate-400" />
                 ) : null}
+                {pressedDayYmd === ymd && !longPressWeekStartYmd ? (
+                  <div className="pointer-events-none absolute inset-0 z-0 rounded-[2px] border-2 border-black/45" />
+                ) : null}
+                {isWeekHighlighted ? (
+                  <div
+                    className={`pointer-events-none absolute inset-0 z-0 ${
+                      weekDayIdx === 0 ? 'border-l-2' : 'border-l-0'
+                    } ${weekDayIdx === 6 ? 'border-r-2' : 'border-r-0'} border-y-2 border-black/45`}
+                  />
+                ) : null}
                 <div className="relative z-10 flex w-full shrink-0 items-center justify-between gap-1">
                   <div className={`text-xs font-semibold ${isCurrentMonth ? 'text-slate-900' : 'text-slate-400'}`}>{dayNum}</div>
+                  {more > 0 ? (
+                    <div className="shrink-0 text-[11px] font-semibold leading-none text-slate-400 tabular-nums">+{more}</div>
+                  ) : null}
                 </div>
                 <div
                   className="relative z-10 -mx-1.5 mt-1 flex min-h-0 flex-1 flex-col overflow-hidden divide-y divide-slate-200 md:-mx-2"
@@ -976,7 +1091,7 @@ export function CalendarView() {
                           e.dataTransfer.effectAllowed = 'move'
                         }}
                         onDragEnd={() => setDragOverDate(null)}
-                        className={`box-border block w-full select-none rounded-[3px] py-0.5 pl-1.5 pr-0 text-left text-[10px] leading-none active:cursor-grabbing md:py-1 md:pl-2 ${
+                        className={`box-border block w-full select-none rounded-[3px] py-[1px] pl-1.5 pr-0 text-left text-[11px] leading-tight active:cursor-grabbing md:py-0.5 md:pl-2 md:text-[11px] ${
 	                          flashTaskId === t.id ? 'emma-flash-3' : ''
 	                        }`}
                         data-completed={isCompleted ? 'true' : 'false'}
@@ -989,15 +1104,20 @@ export function CalendarView() {
                           </span>
                           {isCompleted ? (
                             <span className="shrink-0 tabular-nums text-[9px] font-semibold leading-none tracking-tighter md:hidden">
-                              <span className="bg-white/60 px-1 py-[1px] text-slate-900">✓</span>
+                              <span className="px-1 py-[1px]" style={{ color: textColor }}>
+                                ✓
+                              </span>
                             </span>
                           ) : null}
                           {desktopTagText ? (
                             <span className="hidden shrink-0 tabular-nums text-[9px] font-semibold leading-none tracking-tighter md:inline">
                               <span
-                                className={`bg-white/60 px-1 py-[1px] ${
-                                  isCompleted ? 'text-slate-900' : dday ? 'text-indigo-700' : 'text-slate-700'
+                                className={`px-1 py-[1px] ${
+                                  isCompleted
+                                    ? ''
+                                    : `bg-white/60 ${dday ? 'text-indigo-700' : 'text-slate-700'}`
                                 }`}
+                                style={isCompleted ? { color: textColor } : undefined}
                               >
                                 {desktopTagText}
                               </span>
@@ -1007,9 +1127,7 @@ export function CalendarView() {
                       </button>
                     )
                   })}
-                  {more > 0 ? (
-                    <div className="px-0.5 text-[11px] leading-tight text-slate-400">+{more}</div>
-                  ) : null}
+                  {/* "+N" moved to top-right badge */}
                   {isProbe ? (
                     <div className="pointer-events-none absolute left-0 top-0 opacity-0" aria-hidden="true">
                       <button
@@ -1090,9 +1208,17 @@ export function CalendarView() {
         }}
       >
         <div className="grid grid-cols-7 border-b border-slate-100 bg-slate-50 text-xs font-medium text-slate-600">
-          {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d) => (
-            <div key={d} className="px-1 py-2 md:px-2">
-              {d}
+          {[
+            { k: 'Mon', label: '월', cls: 'text-slate-600' },
+            { k: 'Tue', label: '화', cls: 'text-slate-600' },
+            { k: 'Wed', label: '수', cls: 'text-slate-600' },
+            { k: 'Thu', label: '목', cls: 'text-slate-600' },
+            { k: 'Fri', label: '금', cls: 'text-slate-600' },
+            { k: 'Sat', label: '토', cls: 'text-blue-600' },
+            { k: 'Sun', label: '일', cls: 'text-rose-600' },
+          ].map((d) => (
+            <div key={d.k} className={`px-1 py-2 text-center md:px-2 ${d.cls}`}>
+              {d.label}
             </div>
           ))}
         </div>
@@ -1403,8 +1529,11 @@ export function CalendarView() {
 		                          {editValidationMessage ? (
 		                            <div className="text-sm font-semibold text-rose-700">{editValidationMessage}</div>
 		                          ) : null}
+		                          {editWarningMessage ? (
+		                            <div className="text-sm font-semibold text-amber-700">{editWarningMessage}</div>
+		                          ) : null}
 
-			                          <div className="flex min-w-0 flex-nowrap items-center gap-3 text-base font-medium text-slate-700">
+			                          <div className="flex min-w-0 flex-nowrap items-center gap-2 text-base font-medium text-slate-700">
 			                            <span className="shrink-0 whitespace-nowrap rounded-full bg-slate-100 px-3 py-1.5 text-sm font-semibold text-slate-500">
 			                              계획
 			                            </span>
@@ -1422,8 +1551,8 @@ export function CalendarView() {
 			                              aria-label="시작시간 입력"
 			                            >
 			                              {previewTask.plannedStartTime
-			                                ? `${formatMeridiemHm(previewTask.plannedStartTime) ?? previewTask.plannedStartTime}부터`
-			                                : '시작시간 입력'}
+			                                ? formatMeridiemHm(previewTask.plannedStartTime) ?? previewTask.plannedStartTime
+			                                : '시작시간'}
 			                            </button>
 			                            {previewTask.plannedStartTime ? (
 			                              <button
@@ -1435,12 +1564,12 @@ export function CalendarView() {
 			                                ×
 			                              </button>
 			                            ) : null}
-			                            <span className="shrink-0 px-1.5 text-slate-400">·</span>
+			                            <span className="shrink-0 px-1 text-slate-400">-</span>
 			                            <DurationPickerButton
 			                              valueSeconds={plannedSecondsDraft}
 			                              onChangeSeconds={(nextSeconds) => setPlannedSecondsDraft(nextSeconds)}
-			                              maxHours={99}
-			                              buttonLabel={plannedSecondsDraft > 0 ? formatDurationPreciseKo(plannedSecondsDraft) : '소요시간 입력'}
+			                              maxHours={10}
+			                              buttonLabel={plannedSecondsDraft > 0 ? formatDurationPreciseKo(plannedSecondsDraft) : '소요시간'}
 			                              buttonClassName={`min-w-0 cursor-pointer truncate whitespace-nowrap text-left text-base font-medium tracking-[-0.02em] underline decoration-dotted underline-offset-4 transition md:tracking-[-0.04em] ${
 			                                plannedSecondsDraft > 0
 			                                  ? 'text-slate-700 decoration-slate-200 hover:decoration-slate-400'
@@ -1466,11 +1595,31 @@ export function CalendarView() {
 			                                ×
 			                              </button>
 			                            ) : null}
+			                            <span className="shrink-0 px-1 text-slate-400">-</span>
+			                            <button
+			                              type="button"
+			                              onClick={() => {
+			                                setTimePickerField('plannedEndTime')
+			                                setTimePickerOpen(true)
+			                              }}
+			                              className={`min-w-0 cursor-pointer truncate whitespace-nowrap text-left tracking-[-0.02em] underline decoration-dotted underline-offset-4 transition md:tracking-[-0.04em] ${
+			                                previewTask.plannedStartTime && plannedSecondsDraft > 0
+			                                  ? 'text-slate-700 decoration-slate-200 hover:decoration-slate-400'
+			                                  : 'text-slate-400 decoration-slate-200 hover:decoration-slate-300'
+			                              }`}
+			                              aria-label="종료시간 입력"
+			                            >
+			                              {previewTask.plannedStartTime && plannedSecondsDraft > 0
+			                                ? formatMeridiemHm(addSecondsToHm(previewTask.plannedStartTime, plannedSecondsDraft) ?? '') ??
+			                                  addSecondsToHm(previewTask.plannedStartTime, plannedSecondsDraft) ??
+			                                  '종료시간'
+			                                : '종료시간'}
+			                            </button>
 			                          </div>
 
 		                          <div className="flex flex-col gap-2 md:flex-row md:items-center">
 		                            <div className="flex min-w-0 flex-nowrap items-center gap-3 text-base font-medium text-slate-700 md:flex-1">
-		                              <span className="shrink-0 whitespace-nowrap rounded-full bg-slate-900 px-3 py-1.5 text-sm font-semibold text-white">
+                              <span className="shrink-0 whitespace-nowrap rounded-full bg-black/80 px-3 py-1.5 text-sm font-semibold text-white">
 		                                완료
 		                              </span>
 		                              {previewTask.recordCompleteOnly ? (
@@ -1577,7 +1726,7 @@ export function CalendarView() {
 	                              >
 	                                <span
 	                                  className={`shrink-0 whitespace-nowrap rounded-full px-3 py-1.5 text-sm font-semibold ${
-	                                    item.kind === '완료' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-500'
+	                                    item.kind === '완료' ? 'bg-black/80 text-white' : 'bg-slate-100 text-slate-500'
 	                                  }`}
 	                                >
 	                                  {item.badge}
@@ -1638,6 +1787,7 @@ export function CalendarView() {
 	                    type="button"
 	                    onClick={() => {
 	                      if (!previewTask) return
+	                      setEditWarningMessage(null)
 	                      const draft = editTitleDraft.trim()
 	                      const original = (editTitleOriginalRef.current?.taskId === previewTask.id ? editTitleOriginalRef.current.title : previewTask.title ?? '').trim()
 	                      const addFallbackTitle = buildNextTaskTitle((previewSubject?.name ?? '').trim(), tasks)
@@ -1655,9 +1805,17 @@ export function CalendarView() {
 	                      }
 	                      const start = hmToMinutes(previewTask.actualStartTime ?? null)
 	                      const end = hmToMinutes(previewTask.actualEndTime ?? null)
-	                      if (start !== null && end !== null && end < start) {
-	                        setEditValidationMessage('완료 종료시간이 시작시간보다 빨라요.')
-	                        return
+	                      if (start !== null && end !== null) {
+	                        if (end === start) {
+	                          setEditValidationMessage('완료 종료시간을 시작시간과 동일하게 설정할 수 없어요.')
+	                          return
+	                        }
+	                        const { minutes, wraps } = diffMinutesAllowNextDay(start, end)
+	                        if (minutes > 10 * 60) {
+	                          setEditValidationMessage('완료 시작/종료 간격이 10시간을 넘어서 저장할 수 없어요.')
+	                          return
+	                        }
+	                        if (wraps) setEditWarningMessage('종료시간이 시작시간보다 빨라서, 다음날까지 진행한 것으로 계산돼요.')
 	                      }
 	                      setEditValidationMessage(null)
 	                      if (isAddMode) {
@@ -1688,10 +1846,13 @@ export function CalendarView() {
 	                      const start = hmToMinutes(previewTask.actualStartTime ?? null)
 	                      const end = hmToMinutes(previewTask.actualEndTime ?? null)
 	                      const hasOnlyOne = (start === null) !== (end === null)
-	                      const invalidRange = start !== null && end !== null && end < start
-	                      return hasOnlyOne || invalidRange
+	                      if (hasOnlyOne) return true
+	                      if (start === null || end === null) return false
+	                      if (end === start) return true
+	                      const { minutes } = diffMinutesAllowNextDay(start, end)
+	                      return minutes > 10 * 60
 	                    })()}
-	                    className="inline-flex h-10 w-full items-center justify-center rounded-xl bg-slate-900 px-3 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:bg-slate-300"
+	                    className="inline-flex h-10 w-full items-center justify-center rounded-xl bg-black/80 px-3 py-2 text-sm font-medium text-white transition hover:bg-black/70 disabled:bg-black/30"
 	                  >
 	                    {isAddMode ? '등록' : '완료'}
 	                  </button>
@@ -1706,7 +1867,11 @@ export function CalendarView() {
 	                      const start = previewTask.recordCompleteOnly ? null : hmToMinutes(previewTask.actualStartTime ?? null)
 	                      const end = previewTask.recordCompleteOnly ? null : hmToMinutes(previewTask.actualEndTime ?? null)
 	                      const hasOnlyOne = !previewTask.recordCompleteOnly && ((start === null) !== (end === null))
-	                      const invalidRange = !previewTask.recordCompleteOnly && start !== null && end !== null && end < start
+	                      const invalidRange =
+	                        !previewTask.recordCompleteOnly &&
+	                        start !== null &&
+	                        end !== null &&
+	                        (end === start || diffMinutesAllowNextDay(start, end).minutes > 10 * 60)
 	                      if (hasOnlyOne || invalidRange) {
 	                        setEditExitConfirmOpen(true)
 	                        return
@@ -1714,6 +1879,7 @@ export function CalendarView() {
 	                      setEditTaskId(null)
 	                      setEditDraft(null)
 	                      setEditValidationMessage(null)
+	                      setEditWarningMessage(null)
 	                    }}
 	                    className="inline-flex h-10 w-full items-center justify-center rounded-xl bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-200"
 	                  >
@@ -1728,7 +1894,7 @@ export function CalendarView() {
 	                    <button
 	                      type="button"
 	                      onClick={() => setTimerTaskId(previewTask.id)}
-	                      className="inline-flex h-10 items-center justify-center rounded-xl bg-slate-900 px-3 text-sm font-semibold text-white transition hover:bg-slate-800"
+	                      className="inline-flex h-10 items-center justify-center rounded-xl bg-black/80 px-3 text-sm font-semibold text-white transition hover:bg-black/70"
 	                    >
 	                      타이머
 	                    </button>
@@ -1830,8 +1996,8 @@ export function CalendarView() {
 		                              type="button"
 		                              onClick={() => pickCalendarDay(d)}
 		                              className={`h-10 rounded-xl text-sm font-semibold transition ${
-		                                isSelected
-		                                  ? 'bg-slate-900 text-white'
+                                isSelected
+                                  ? 'bg-black/80 text-white'
 		                                  : inMonth
 		                                    ? 'text-slate-900 hover:bg-slate-100'
 		                                    : 'text-slate-300 hover:bg-slate-50'
@@ -1857,7 +2023,9 @@ export function CalendarView() {
 		                    ? '완료 시작시간'
 		                    : timePickerField === 'actualEndTime'
 		                      ? '완료 종료시간'
-		                      : '계획 시작시간'
+		                      : timePickerField === 'plannedEndTime'
+		                        ? '계획 종료시간'
+		                        : '계획 시작시간'
 		                }
 		                initialHm={
 		                  (() => {
@@ -1866,11 +2034,16 @@ export function CalendarView() {
 		                      ? previewTask.actualStartTime ?? previewTask.actualEndTime ?? null
 		                      : timePickerField === 'actualEndTime'
 		                        ? previewTask.actualEndTime ?? previewTask.actualStartTime ?? null
-		                        : previewTask.plannedStartTime ?? null
+		                        : timePickerField === 'plannedEndTime'
+		                          ? addSecondsToHm(previewTask.plannedStartTime ?? '00:00', plannedSecondsDraft) ??
+		                            previewTask.plannedStartTime ??
+		                            null
+		                          : previewTask.plannedStartTime ?? null
 		                  })()
 		                }
 		                onApply={(hm) => {
 		                  if (!previewTask) return
+		                  setEditWarningMessage(null)
 		                  if (timePickerField === 'actualStartTime') {
 		                    patchPreviewTask({
 		                      actualStartTime: hm,
@@ -1881,6 +2054,20 @@ export function CalendarView() {
 		                      actualEndTime: hm,
 		                      actualStartTime: previewTask.actualStartTime ? previewTask.actualStartTime : hm,
 		                    })
+		                  } else if (timePickerField === 'plannedEndTime') {
+		                    const startMin = hmToMinutes(previewTask.plannedStartTime ?? null)
+		                    const endMin = hmToMinutes(hm)
+		                    if (startMin === null || endMin === null) {
+		                      patchPreviewTask({ plannedStartTime: hm })
+		                      return
+		                    }
+		                    if (endMin === startMin) return
+		                    const { minutes, wraps } = diffMinutesAllowNextDay(startMin, endMin)
+		                    if (minutes > 10 * 60) return
+		                    if (wraps) setEditWarningMessage('종료시간이 시작시간보다 빨라서, 다음날까지 진행한 것으로 계산돼요.')
+		                    const nextSeconds = Math.max(0, minutes * 60)
+		                    setPlannedSecondsDraft(nextSeconds)
+		                    patchPreviewTask({ plannedSeconds: nextSeconds })
 		                  } else {
 		                    patchPreviewTask({ plannedStartTime: hm })
 		                  }
@@ -1888,12 +2075,27 @@ export function CalendarView() {
 		                validate={(hm) => {
 		                  const proposedMin = hmToMinutes(hm)
 		                  if (proposedMin === null) return null
+		                  if (timePickerField === 'plannedEndTime') {
+		                    const startMin = hmToMinutes(previewTask?.plannedStartTime ?? null)
+		                    if (startMin === null) return null
+		                    if (proposedMin === startMin) return '종료시간을 시작시간과 동일하게 설정할 수 없어요.'
+		                    const { minutes } = diffMinutesAllowNextDay(startMin, proposedMin)
+		                    if (minutes > 10 * 60) return '시작/종료 간격이 10시간을 넘어서 저장할 수 없어요.'
+		                    return null
+		                  }
 		                  const startMin = timePickerField === 'actualEndTime' ? hmToMinutes(previewTask?.actualStartTime ?? null) : null
 		                  const endMin = timePickerField === 'actualStartTime' ? hmToMinutes(previewTask?.actualEndTime ?? null) : null
-		                  const invalid =
-		                    (timePickerField === 'actualStartTime' && endMin !== null && endMin < proposedMin) ||
-		                    (timePickerField === 'actualEndTime' && startMin !== null && proposedMin < startMin)
-		                  return invalid ? '종료시간이 시작시간보다 빨라요.' : null
+		                  if (timePickerField === 'actualStartTime' && endMin !== null) {
+		                    if (endMin === proposedMin) return '종료시간을 시작시간과 동일하게 설정할 수 없어요.'
+		                    const { minutes } = diffMinutesAllowNextDay(proposedMin, endMin)
+		                    if (minutes > 10 * 60) return '시작/종료 간격이 10시간을 넘어서 저장할 수 없어요.'
+		                  }
+		                  if (timePickerField === 'actualEndTime' && startMin !== null) {
+		                    if (proposedMin === startMin) return '종료시간을 시작시간과 동일하게 설정할 수 없어요.'
+		                    const { minutes } = diffMinutesAllowNextDay(startMin, proposedMin)
+		                    if (minutes > 10 * 60) return '시작/종료 간격이 10시간을 넘어서 저장할 수 없어요.'
+		                  }
+		                  return null
 		                }}
 		              />
 		            ) : null}
@@ -1944,7 +2146,7 @@ export function CalendarView() {
 	          />
 	        ) : null}
 
-	      {/* Always-on floating "Start 예정" popup above bottom bar (mobile). */}
+	      {/* Always-on floating "날짜 미정" popup above bottom bar (mobile). */}
 	      <div
 	        data-start-dock-root
 	        className={`fixed z-40 flex items-start justify-end gap-[10px] md:hidden ${startDockOrigin}`}
@@ -1959,7 +2161,7 @@ export function CalendarView() {
 	        {!startOpen ? (
 	          <button
 	            type="button"
-	            className="flex h-[64px] w-[64px] items-center justify-center rounded-full bg-slate-900 text-white shadow-xl ring-1 ring-black/10"
+	            className="flex h-[64px] w-[64px] items-center justify-center rounded-full bg-black/80 text-white shadow-xl ring-1 ring-black/10"
 	            onClick={() => openTaskAdd()}
 	            aria-label="일정 추가"
 	          >
@@ -1995,12 +2197,12 @@ export function CalendarView() {
             onPointerUp={onStartDockPointerUp}
             onPointerCancel={onStartDockPointerUp}
 		            style={{ touchAction: 'none' }}
-		            aria-label="시작 예정 열기"
+		            aria-label="날짜 미정 열기"
 		          >
 		            <div className="relative">
 		              <StartPendingBubbleIcon />
 		              {unassignedPending.length ? (
-		                <div className="absolute -right-2.5 -top-2.5 min-w-[18px] rounded-full bg-slate-900 px-1.5 py-0.5 text-center text-[11px] font-semibold leading-none text-white tabular-nums shadow-sm">
+		                <div className="absolute -right-2.5 -top-2.5 min-w-[18px] rounded-full bg-black/80 px-1.5 py-0.5 text-center text-[11px] font-semibold leading-none text-white tabular-nums shadow-sm">
 		                  {unassignedPending.length > 99 ? '99+' : unassignedPending.length}
 		                </div>
 		              ) : null}
@@ -2022,7 +2224,7 @@ export function CalendarView() {
                 style={{ touchAction: 'none' }}
               >
                 <div className="flex items-center gap-2">
-                  <div className="text-sm font-semibold text-slate-900">시작 예정</div>
+                    <div className="text-sm font-semibold text-slate-900">날짜 미정</div>
                   {unassignedPending.length ? (
                     <div className="rounded-full bg-white/7 px-2 py-0.5 text-[11px] font-semibold text-slate-800 tabular-nums backdrop-blur">
                       {unassignedPending.length}
@@ -2041,7 +2243,7 @@ export function CalendarView() {
                   <Button
                     variant="secondary"
                     onClick={() => setStartOpen(false)}
-                    aria-label="시작 예정 닫기"
+                    aria-label="날짜 미정 닫기"
                   >
                     <span aria-hidden="true" className="text-lg leading-none">
                       ×
@@ -2076,7 +2278,7 @@ export function CalendarView() {
 	                      {unassignedBySubject.map((g) => {
 	                        const subject = subjects.find((s) => s.id === g.subjectId)
 	                        const columns = []
-	                        for (let i = 0; i < g.list.length; i += 4) columns.push(g.list.slice(i, i + 4))
+	                        for (let i = 0; i < g.list.length; i += 3) columns.push(g.list.slice(i, i + 3))
 	                        return (
 	                          <div key={g.subjectId} className="flex h-full shrink-0 flex-col">
 	                            <div className="mb-1 w-[calc((100vw-0.75rem)/7)] overflow-hidden whitespace-nowrap text-[11px] font-semibold text-slate-800">
@@ -2114,7 +2316,7 @@ export function CalendarView() {
                                         e.dataTransfer.effectAllowed = 'move'
                                       }}
                                       onDragEnd={() => setDragOverDate(null)}
-	                                      className={`box-border block w-full select-none overflow-hidden rounded-[3px] py-0.5 pl-1.5 pr-10 text-left text-[10px] leading-none active:cursor-grabbing md:py-1 ${
+	                                      className={`box-border block w-full select-none overflow-hidden rounded-[8px] px-2 py-1.5 text-left text-[11px] leading-tight active:cursor-grabbing ${
 	                                        flashTaskId === t.id ? 'emma-flash-3' : ''
 	                                      }`}
                                       style={{

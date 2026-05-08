@@ -231,7 +231,7 @@ export function DurationPickerButton({
                     onClick={() => {
                       setOpen(false)
                     }}
-                    className="w-full rounded-2xl bg-slate-900 px-4 py-3.5 text-base font-semibold text-white transition hover:bg-slate-800"
+                    className="w-full rounded-2xl bg-black/80 px-4 py-3.5 text-base font-semibold text-white transition hover:bg-black/70"
                   >
                     적용
                   </button>

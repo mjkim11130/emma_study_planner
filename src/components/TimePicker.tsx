@@ -216,7 +216,7 @@ export function TimePickerModal({
               onApply(hm)
               onClose()
             }}
-            className="w-full rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:bg-slate-300"
+            className="w-full rounded-2xl bg-black/80 px-4 py-3 text-sm font-semibold text-white transition hover:bg-black/70 disabled:bg-black/30"
           >
             선택
           </button>

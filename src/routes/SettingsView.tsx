@@ -150,7 +150,7 @@ export function SettingsView() {
                   tasks: state.tasks,
                 }
                 await getSupabase().from('planner_state').upsert({ user_id: user.id, data })
-                navigate('/calendar', { replace: true })
+                navigate('/', { replace: true })
               }}
             >
               이 계정 데이터 초기화
@@ -213,7 +213,7 @@ export function SettingsView() {
             <div
               key={e.id}
               className={`flex items-center justify-between gap-3 rounded-2xl px-3 py-3 transition ${
-                e.id === activeExamId ? 'bg-slate-900 text-white' : 'bg-slate-50 text-slate-900 opacity-60 hover:opacity-100'
+                e.id === activeExamId ? 'bg-black/80 text-white' : 'bg-slate-50 text-slate-900 opacity-60 hover:opacity-100'
               }`}
             >
               <button

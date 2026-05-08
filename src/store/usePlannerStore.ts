@@ -19,7 +19,7 @@ type PlannerState = {
   lastUsedSubjectIdByExam: Record<string, string>
   subjectOrderByExam: Record<string, string[]>
   addSubject: (input: { name: string; color: string; examId?: string }) => void
-  updateSubject: (id: string, patch: Partial<Pick<Subject, 'name' | 'color' | 'examId' | 'archived'>>) => void
+  updateSubject: (id: string, patch: Partial<Pick<Subject, 'name' | 'color' | 'examId' | 'archived' | 'isRest'>>) => void
   deleteSubject: (id: string) => void
   setSubjectOrder: (examId: string, subjectIds: string[]) => void
   addTask: (input: {

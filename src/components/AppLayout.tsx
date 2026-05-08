@@ -12,9 +12,9 @@ export const SidebarToggleContext = createContext<{ open: boolean; toggle: () =>
 
 function IconCalendarMonth() {
   return (
-    <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true">
+    <svg viewBox="0 -960 960 960" className="h-5 w-5" aria-hidden="true">
       <path
-        d="M19 4h-1V2h-2v2H8V2H6v2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V10h14v10zm0-12H5V6h14v2z"
+        d="M480-400q-17 0-28.5-11.5T440-440q0-17 11.5-28.5T480-480q17 0 28.5 11.5T520-440q0 17-11.5 28.5T480-400Zm-188.5-11.5Q280-423 280-440t11.5-28.5Q303-480 320-480t28.5 11.5Q360-457 360-440t-11.5 28.5Q337-400 320-400t-28.5-11.5ZM640-400q-17 0-28.5-11.5T600-440q0-17 11.5-28.5T640-480q17 0 28.5 11.5T680-440q0 17-11.5 28.5T640-400ZM480-240q-17 0-28.5-11.5T440-280q0-17 11.5-28.5T480-320q17 0 28.5 11.5T520-280q0 17-11.5 28.5T480-240Zm-188.5-11.5Q280-263 280-280t11.5-28.5Q303-320 320-320t28.5 11.5Q360-297 360-280t-11.5 28.5Q337-240 320-240t-28.5-11.5ZM640-240q-17 0-28.5-11.5T600-280q0-17 11.5-28.5T640-320q17 0 28.5 11.5T680-280q0 17-11.5 28.5T640-240ZM200-80q-33 0-56.5-23.5T120-160v-560q0-33 23.5-56.5T200-800h40v-80h80v80h320v-80h80v80h40q33 0 56.5 23.5T840-720v560q0 33-23.5 56.5T760-80H200Zm0-80h560v-400H200v400Z"
         fill="currentColor"
       />
     </svg>
@@ -23,8 +23,22 @@ function IconCalendarMonth() {
 
 function IconCalendarViewDay() {
   return (
-    <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true">
-      <path d="M3 5h18v2H3V5zm0 4h7v10H3V9zm9 0h9v2h-9V9zm0 4h9v2h-9v-2zm0 4h9v2h-9v-2z" fill="currentColor" />
+    <svg viewBox="0 -960 960 960" className="h-5 w-5" aria-hidden="true">
+      <path
+        d="M200-280q-33 0-56.5-23.5T120-360v-240q0-33 23.5-56.5T200-680h560q33 0 56.5 23.5T840-600v240q0 33-23.5 56.5T760-280H200Zm-80-480v-80h720v80H120Zm0 640v-80h720v80H120Z"
+        fill="currentColor"
+      />
+    </svg>
+  )
+}
+
+function IconCalendarWeek() {
+  return (
+    <svg viewBox="0 -960 960 960" className="h-5 w-5" aria-hidden="true">
+      <path
+        d="M160-160q-33 0-56.5-23.5T80-240v-480q0-33 23.5-56.5T160-800h640q33 0 56.5 23.5T880-720v480q0 33-23.5 56.5T800-160H160Zm0-360h160v-200H160v200Zm240 0h160v-200H400v200Zm240 0h160v-200H640v200ZM320-240v-200H160v200h160Zm80 0h160v-200H400v200Zm240 0h160v-200H640v200Z"
+        fill="currentColor"
+      />
     </svg>
   )
 }
@@ -39,9 +53,9 @@ function IconFolder() {
 
 function IconSettings() {
   return (
-    <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true">
+    <svg viewBox="0 -960 960 960" className="h-5 w-5" aria-hidden="true">
       <path
-        d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58c.18-.14.23-.4.12-.61l-1.92-3.32c-.11-.21-.36-.3-.58-.22l-2.39.96c-.5-.38-1.04-.69-1.63-.92l-.36-2.54A.5.5 0 0 0 14.3 1h-4.6a.5.5 0 0 0-.49.42l-.36 2.54c-.59.23-1.13.54-1.63.92l-2.39-.96c-.22-.09-.47.01-.58.22L1.33 9.46c-.11.21-.06.47.12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58c-.18.14-.23.4-.12.61l1.92 3.32c.11.21.36.3.58.22l2.39-.96c.5.38 1.04.69 1.63.92l.36 2.54c.04.24.25.42.49.42h4.6c.24 0 .45-.18.49-.42l.36-2.54c.59-.23 1.13-.54 1.63-.92l2.39.96c.22.09.47-.01.58-.22l1.92-3.32c.11-.21.06-.47-.12-.61l-2.03-1.58zM12 15.5A3.5 3.5 0 1 1 12 8a3.5 3.5 0 0 1 0 7.5z"
+        d="m370-80-16-128q-13-5-24.5-12T307-235l-119 50L78-375l103-78q-1-7-1-13.5v-27q0-6.5 1-13.5L78-585l110-190 119 50q11-8 23-15t24-12l16-128h220l16 128q13 5 24.5 12t22.5 15l119-50 110 190-103 78q1 7 1 13.5v27q0 6.5-2 13.5l103 78-110 190-118-50q-11 8-23 15t-24 12L590-80H370Zm112-260q58 0 99-41t41-99q0-58-41-99t-99-41q-59 0-99.5 41T342-480q0 58 40.5 99t99.5 41Z"
         fill="currentColor"
       />
     </svg>
@@ -88,21 +102,46 @@ function truncateText(s: string, max: number) {
   return s.slice(0, max)
 }
 
-function NavItem({ to, label, icon, active }: { to: string; label: string; icon: ReactNode; active?: boolean }) {
+function HamburgerIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5">
+      <path d="M5 7h14M5 12h14M5 17h14" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+function NavItem({
+  to,
+  label,
+  icon,
+  active,
+  compact,
+}: {
+  to: string
+  label: string
+  icon: ReactNode
+  active?: boolean
+  compact?: boolean
+}) {
   return (
     <NavLink
       to={to}
       className={({ isActive }) => {
         const on = typeof active === 'boolean' ? active : isActive
-        return `flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm font-semibold transition ${
-          on ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-        }`
+        if (compact) {
+          return `flex h-11 w-full items-center gap-3 rounded-2xl px-3 text-sm font-semibold transition ${
+            on ? 'bg-black/80 text-white' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+          }`
+        }
+        return `flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm font-semibold transition ${on ? 'bg-black/80 text-white' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'}`
       }}
+      title={compact ? label : undefined}
+      aria-label={compact ? label : undefined}
     >
       <span className="inline-flex h-6 w-6 items-center justify-center" aria-hidden="true">
         {icon}
       </span>
-      <span className="truncate">{label}</span>
+      {compact ? null : <span className="truncate">{label}</span>}
     </NavLink>
   )
 }
@@ -113,17 +152,20 @@ export function AppLayout() {
   const hideBottom = false
   const activeExamId = usePlannerStore((s) => s.activeExamId)
   const subjects = usePlannerStore((s) => s.subjects)
+  const subjectOrderByExam = usePlannerStore((s) => s.subjectOrderByExam)
+  const setSubjectOrder = usePlannerStore((s) => s.setSubjectOrder)
   const tasks = usePlannerStore((s) => s.tasks)
   const updateTask = usePlannerStore((s) => s.updateTask)
   const lastUsedSubjectIdByExam = usePlannerStore((s) => s.lastUsedSubjectIdByExam)
-  const isCalendarPage = location.pathname.startsWith('/calendar')
+  const isCalendarPage = location.pathname === '/' || location.pathname.startsWith('/calendar')
+  const isWeekPage = location.pathname.startsWith('/week')
   const isDayPage = location.pathname.startsWith('/day/')
+  const isDashboardPage = location.pathname.startsWith('/dashboard')
   const dayPageMatch = /^\/day\/(\d{4}-\d{2}-\d{2})$/.exec(location.pathname)
   const dayPageDate = dayPageMatch?.[1] ?? ''
-  const dayView = new URLSearchParams(location.search).get('view')
-  const isDayTimelineMode = Boolean(dayPageDate) && (dayView === null || dayView === '' || dayView === 'timeline')
   const [taskDialogRequest, setTaskDialogRequest] = useState<null | { mode: 'add'; date?: string; subjectId?: string } | { mode: 'preview'; taskId: string; autoEdit?: boolean; autoCloseAfterComplete?: boolean }>(null)
   const [subjectDialogOpen, setSubjectDialogOpen] = useState(false)
+  const [subjectDialogForTaskCreate, setSubjectDialogForTaskCreate] = useState(false)
   const [pendingTaskCreate, setPendingTaskCreate] = useState<null | { date?: string }>(null)
   const [sidebarSubjectGroupsOpen, setSidebarSubjectGroupsOpen] = useState(() => {
     try {
@@ -153,6 +195,7 @@ export function AppLayout() {
       ''
     if (!fallbackSubjectId) {
       setPendingTaskCreate({})
+      setSubjectDialogForTaskCreate(true)
       setSubjectDialogOpen(true)
       return
     }
@@ -169,6 +212,7 @@ export function AppLayout() {
       ''
     if (!fallbackSubjectId) {
       setPendingTaskCreate({ date })
+      setSubjectDialogForTaskCreate(true)
       setSubjectDialogOpen(true)
       return
     }
@@ -184,6 +228,27 @@ export function AppLayout() {
     [tasks, activeExamId],
   )
 
+  const scopedSubjects = useMemo(() => subjects.filter((s) => s.examId === activeExamId), [subjects, activeExamId])
+  const scopedSubjectOrder = useMemo(() => subjectOrderByExam[activeExamId] ?? [], [subjectOrderByExam, activeExamId])
+  const scopedSubjectsOrdered = useMemo(() => {
+    const byId = new Map(scopedSubjects.map((s) => [s.id, s] as const))
+    const out: typeof scopedSubjects = []
+    const seen = new Set<string>()
+    for (const id of scopedSubjectOrder) {
+      const s = byId.get(id)
+      if (!s) continue
+      out.push(s)
+      seen.add(id)
+    }
+    for (const s of scopedSubjects) if (!seen.has(s.id)) out.push(s)
+    return out
+  }, [scopedSubjects, scopedSubjectOrder])
+  const subjectOrderIndex = useMemo(() => {
+    const map = new Map<string, number>()
+    scopedSubjectsOrdered.forEach((s, idx) => map.set(s.id, idx))
+    return map
+  }, [scopedSubjectsOrdered])
+
   const unassignedBySubject = useMemo(() => {
     const map = new Map<string, typeof unassignedPending>()
     for (const t of unassignedPending) {
@@ -196,9 +261,14 @@ export function AppLayout() {
       newest: list.reduce((acc, cur) => (cur.createdAt > acc ? cur.createdAt : acc), list[0]?.createdAt ?? ''),
       list: list.slice().sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
     }))
-    groups.sort((a, b) => b.newest.localeCompare(a.newest))
+    groups.sort((a, b) => {
+      const ai = subjectOrderIndex.get(a.subjectId) ?? 999999
+      const bi = subjectOrderIndex.get(b.subjectId) ?? 999999
+      if (ai !== bi) return ai - bi
+      return b.newest.localeCompare(a.newest)
+    })
     return groups
-  }, [unassignedPending])
+  }, [unassignedPending, subjectOrderIndex])
 
   const dayUnscheduled = useMemo(() => {
     if (!dayPageDate) return []
@@ -219,21 +289,49 @@ export function AppLayout() {
     >
       <SidebarToggleContext.Provider value={{ open: sidebarOpen, toggle: () => setSidebarOpen((cur) => !cur) }}>
         <div className="h-full [--bottom-nav-h:72px]">
-          <div className={`grid h-full w-full grid-cols-1 ${sidebarOpen ? 'md:grid-cols-[260px_1fr]' : 'md:grid-cols-[1fr]'}`}>
-            <aside className={`${sidebarOpen ? 'md:flex' : 'md:hidden'} hidden border-r border-slate-200 bg-white p-3 md:min-h-0 md:flex-col`}>
-            <div className="px-2 py-2 text-sm font-semibold text-slate-900" />
-            <div className="mt-3 flex flex-col gap-1.5">
-              <NavItem to="calendar" label="월별" icon={<IconCalendarMonth />} />
-              <NavItem to={`/day/${todayYmd()}`} label="일별" icon={<IconCalendarViewDay />} active={isDayPage} />
-              <NavItem to="dashboard" label="주제" icon={<IconFolder />} />
-              <NavItem to="settings" label="설정" icon={<IconSettings />} />
+          <div
+            className={`grid h-full w-full grid-cols-1 ${
+              sidebarOpen ? 'md:grid-cols-[260px_1fr]' : 'md:grid-cols-[72px_1fr]'
+            }`}
+          >
+            <aside className="hidden border-r border-slate-200 bg-white md:flex md:min-h-0 md:flex-col">
+            <div className={sidebarOpen ? 'p-3' : 'p-2'}>
+              <div className={sidebarOpen ? 'flex justify-end px-2 py-2' : 'px-1 py-1'}>
+                <button
+                  type="button"
+                  onClick={() => setSidebarOpen((cur) => !cur)}
+                  className={`inline-flex h-11 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-100 ${
+                    sidebarOpen ? 'w-11' : 'w-full gap-3 px-3'
+                  }`}
+                  aria-label={sidebarOpen ? '사이드바 닫기' : '사이드바 열기'}
+                  title={sidebarOpen ? '사이드바 닫기' : '사이드바 열기'}
+                >
+                  <HamburgerIcon />
+                </button>
+              </div>
+
+              <div className={sidebarOpen ? 'mt-3 flex flex-col gap-1.5' : 'mt-2 flex flex-col gap-1.5'}>
+                <NavItem to="/" label="월간" icon={<IconCalendarMonth />} compact={!sidebarOpen} />
+                <NavItem to="week" label="주간" icon={<IconCalendarWeek />} compact={!sidebarOpen} />
+                <NavItem to={`/day/${todayYmd()}`} label="일간" icon={<IconCalendarViewDay />} active={isDayPage} compact={!sidebarOpen} />
+                <NavItem to="dashboard" label="주제" icon={<IconFolder />} compact={!sidebarOpen} />
+                <NavItem to="settings" label="설정" icon={<IconSettings />} compact={!sidebarOpen} />
+              </div>
             </div>
 
-            {isCalendarPage ? (
-              <div className="mt-3 flex min-h-0 flex-1 flex-col rounded-2xl border border-slate-200 bg-white">
+            {sidebarOpen && (isCalendarPage || isWeekPage) ? (
+              <div className="mt-3 flex min-h-0 flex-1 flex-col bg-white">
                 <div className="flex items-center justify-between px-3 py-2">
                   <div className="flex items-center gap-2">
-                    <div className="text-[12px] font-semibold text-slate-900">시작 예정</div>
+                    <div className="flex items-center gap-1.5 text-[12px] font-semibold text-slate-900">
+                      <svg viewBox="0 -960 960 960" className="h-4 w-4 text-slate-800" aria-hidden="true">
+                          <path
+                            d="m388-212-56-56 92-92-92-92 56-56 92 92 92-92 56 56-92 92 92 92-56 56-92-92-92 92ZM200-80q-33 0-56.5-23.5T120-160v-560q0-33 23.5-56.5T200-800h40v-80h80v80h320v-80h80v80h40q33 0 56.5 23.5T840-720v560q0 33-23.5 56.5T760-80H200Zm0-80h560v-400H200v400Z"
+                            fill="currentColor"
+                          />
+                        </svg>
+                      <span>날짜 미정</span>
+                    </div>
                     {unassignedPending.length ? (
                       <div className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-700 tabular-nums">
                         {unassignedPending.length}
@@ -323,11 +421,19 @@ export function AppLayout() {
               </div>
             ) : null}
 
-            {dayPageDate && isDayTimelineMode ? (
-              <div className="mt-3 flex min-h-0 flex-1 flex-col rounded-2xl border border-slate-200 bg-white">
+            {sidebarOpen && dayPageDate ? (
+              <div className="mt-3 flex min-h-0 flex-1 flex-col bg-white">
                 <div className="flex items-center justify-between px-3 py-2">
                   <div className="flex items-center gap-2">
-                    <div className="text-[12px] font-semibold text-slate-900">시간 미정</div>
+                    <div className="flex items-center gap-1.5 text-[12px] font-semibold text-slate-900">
+                      <svg viewBox="0 -960 960 960" className="h-4 w-4 text-slate-800" aria-hidden="true">
+                        <path
+                          d="M612-292 440-464v-216h80v184l148 148-56 56Zm-498-25q-13-29-21-60t-11-63h81q3 21 8.5 42t13.5 41l-71 40ZM82-520q3-32 11-63.5t22-60.5l70 40q-8 20-13.5 41t-8.5 43H82Zm165 366q-27-20-50-43.5T154-248l70-40q14 18 29.5 33.5T287-225l-40 71Zm-22-519-71-40q20-27 43-50t50-43l40 71q-17 14-32.5 29.5T225-673ZM440-82q-32-3-63.5-11T316-115l40-70q20 8 41 13.5t43 8.5v81Zm-84-693-40-70q29-14 60.5-22t63.5-11v81q-22 3-43 8.5T356-775ZM520-82v-81q22-3 43-8.5t41-13.5l40 70q-29 14-60.5 22T520-82Zm84-693q-20-8-41-13.5t-43-8.5v-81q32 3 63.5 11t60.5 22l-40 70Zm109 621-40-71q17-14 32.5-29.5T735-287l71 40q-20 27-43 50.5T713-154Zm22-519q-14-17-29.5-32.5T673-735l40-71q27 19 50 42t42 50l-70 41Zm62 153q-3-22-8.5-43T775-604l70-41q13 30 21.5 61.5T878-520h-81Zm48 204-70-40q8-20 13.5-41t8.5-43h81q-3 32-11 63.5T845-316Z"
+                          fill="currentColor"
+                        />
+                      </svg>
+                      <span>시간 미정</span>
+                    </div>
                     {dayUnscheduled.length ? (
                       <div className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-700 tabular-nums">
                         {dayUnscheduled.length}
@@ -366,7 +472,12 @@ export function AppLayout() {
                           g.items.push(t)
                           bySubject.set(key, g)
                         }
-                        const groups = Array.from(bySubject.values()).sort((a, b) => a.subjectName.localeCompare(b.subjectName))
+                        const groups = Array.from(bySubject.values()).sort((a, b) => {
+                          const ai = subjectOrderIndex.get(a.subjectId) ?? 999999
+                          const bi = subjectOrderIndex.get(b.subjectId) ?? 999999
+                          if (ai !== bi) return ai - bi
+                          return a.subjectName.localeCompare(b.subjectName)
+                        })
                         return groups.map((g) => {
                           const isOpen = sidebarSubjectGroupsOpen.day[g.subjectId] ?? true
                           return (
@@ -469,22 +580,106 @@ export function AppLayout() {
                 </div>
               </div>
             ) : null}
+
+            {sidebarOpen && isDashboardPage ? (
+              <div className="mt-3 flex min-h-0 flex-1 flex-col bg-white">
+                <div className="flex items-center justify-between px-3 py-2">
+                  <div className="flex items-center gap-2 text-[12px] font-semibold text-slate-900">
+                    <svg viewBox="0 -960 960 960" className="h-4 w-4 text-slate-800" aria-hidden="true">
+                      <path
+                        d="M80-160v-280h360v280H80Zm0-360v-280h360v280H80Zm80-80h200v-120H160v120Zm560 440L520-360l56-56 104 103v-487h80v487l104-103 56 56-200 200Z"
+                        fill="currentColor"
+                      />
+                    </svg>
+                    <span>주제 순서</span>
+                  </div>
+                  <Button
+                    variant="primary"
+                    onClick={() => {
+                      setPendingTaskCreate(null)
+                      setSubjectDialogForTaskCreate(false)
+                      setSubjectDialogOpen(true)
+                    }}
+                  >
+                    + 주제 등록
+                  </Button>
+                </div>
+                <div className="min-h-0 flex-1 border-t border-slate-100 p-2">
+                  <div className="h-full min-h-0 overflow-y-auto overscroll-contain pr-1">
+                    <div className="space-y-2">
+                      {scopedSubjectsOrdered.map((s, idx) => (
+                        <div key={s.id} className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-2.5 py-2">
+                          <div className="min-w-0">
+                            <div className="flex min-w-0 items-center gap-2">
+                              <span className="h-4 w-2" style={{ background: s.color }} aria-hidden="true" />
+                              <div className="min-w-0 truncate text-[12px] font-semibold text-slate-900">{s.name}</div>
+                            </div>
+                          </div>
+                          <div className="flex shrink-0 items-center gap-1">
+                            <button
+                              type="button"
+                              disabled={idx === 0}
+                              onClick={() => {
+                                const next = scopedSubjectsOrdered.map((x) => x.id)
+                                ;[next[idx - 1], next[idx]] = [next[idx], next[idx - 1]]
+                                setSubjectOrder(activeExamId, next)
+                              }}
+                              className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-30"
+                              aria-label="위로"
+                            >
+                              ↑
+                            </button>
+                            <button
+                              type="button"
+                              disabled={idx === scopedSubjectsOrdered.length - 1}
+                              onClick={() => {
+                                const next = scopedSubjectsOrdered.map((x) => x.id)
+                                ;[next[idx + 1], next[idx]] = [next[idx], next[idx + 1]]
+                                setSubjectOrder(activeExamId, next)
+                              }}
+                              className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 disabled:opacity-30"
+                              aria-label="아래로"
+                            >
+                              ↓
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                      {scopedSubjectsOrdered.length === 0 ? <div className="px-1 py-2 text-xs text-slate-400">비어있음</div> : null}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : null}
             </aside>
             <main className="min-h-0 overflow-auto px-0 py-0 pb-[calc(var(--bottom-nav-h)+env(safe-area-inset-bottom))] md:p-3 md:pb-3">
               <Outlet />
             </main>
           </div>
+
           {!hideBottom ? (
             <div className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/95 shadow-[0_-12px_40px_rgba(15,23,42,0.08)] backdrop-blur md:hidden">
               <div style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
-                <div className="mx-auto grid max-w-xl grid-cols-4 px-2 pb-2 pt-2">
-                  <BottomNavItem
-                    to="calendar"
-                    label="월별"
-                    icon={
-                      <svg viewBox="0 0 24 24" className="h-6 w-6" aria-hidden="true">
+                <div className="mx-auto grid max-w-xl grid-cols-5 px-2 pb-2 pt-2">
+	                  <BottomNavItem
+	                    to="/"
+	                    label="월간"
+	                    icon={
+	                      <svg viewBox="0 -960 960 960" className="h-6 w-6" aria-hidden="true">
                         <path
-                          d="M19 4h-1V2h-2v2H8V2H6v2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V10h14v10zm0-12H5V6h14v2z"
+                          d="M480-400q-17 0-28.5-11.5T440-440q0-17 11.5-28.5T480-480q17 0 28.5 11.5T520-440q0 17-11.5 28.5T480-400Zm-188.5-11.5Q280-423 280-440t11.5-28.5Q303-480 320-480t28.5 11.5Q360-457 360-440t-11.5 28.5Q337-400 320-400t-28.5-11.5ZM640-400q-17 0-28.5-11.5T600-440q0-17 11.5-28.5T640-480q17 0 28.5 11.5T680-440q0 17-11.5 28.5T640-400ZM480-240q-17 0-28.5-11.5T440-280q0-17 11.5-28.5T480-320q17 0 28.5 11.5T520-280q0 17-11.5 28.5T480-240Zm-188.5-11.5Q280-263 280-280t11.5-28.5Q303-320 320-320t28.5 11.5Q360-297 360-280t-11.5 28.5Q337-240 320-240t-28.5-11.5ZM640-240q-17 0-28.5-11.5T600-280q0-17 11.5-28.5T640-320q17 0 28.5 11.5T680-280q0 17-11.5 28.5T640-240ZM200-80q-33 0-56.5-23.5T120-160v-560q0-33 23.5-56.5T200-800h40v-80h80v80h320v-80h80v80h40q33 0 56.5 23.5T840-720v560q0 33-23.5 56.5T760-80H200Zm0-80h560v-400H200v400Z"
+                          fill="currentColor"
+                        />
+                      </svg>
+                    }
+                  />
+                  <BottomNavItem
+                    to="week"
+                    label="주간"
+                    icon={
+                      <svg viewBox="0 -960 960 960" className="h-6 w-6" aria-hidden="true">
+                        <path
+                          d="M160-160q-33 0-56.5-23.5T80-240v-480q0-33 23.5-56.5T160-800h640q33 0 56.5 23.5T880-720v480q0 33-23.5 56.5T800-160H160Zm0-360h160v-200H160v200Zm240 0h160v-200H400v200Zm240 0h160v-200H640v200ZM320-240v-200H160v200h160Zm80 0h160v-200H400v200Zm240 0h160v-200H640v200Z"
                           fill="currentColor"
                         />
                       </svg>
@@ -492,12 +687,12 @@ export function AppLayout() {
                   />
                   <BottomNavItem
                     to={`/day/${todayYmd()}`}
-                    label="일별"
+                    label="일간"
                     active={isDayPage}
                     icon={
-                      <svg viewBox="0 0 24 24" className="h-6 w-6" aria-hidden="true">
+                      <svg viewBox="0 -960 960 960" className="h-6 w-6" aria-hidden="true">
                         <path
-                          d="M3 5h18v2H3V5zm0 4h7v10H3V9zm9 0h9v2h-9V9zm0 4h9v2h-9v-2zm0 4h9v2h-9v-2z"
+                          d="M200-280q-33 0-56.5-23.5T120-360v-240q0-33 23.5-56.5T200-680h560q33 0 56.5 23.5T840-600v240q0 33-23.5 56.5T760-280H200Zm-80-480v-80h720v80H120Zm0 640v-80h720v80H120Z"
                           fill="currentColor"
                         />
                       </svg>
@@ -516,9 +711,9 @@ export function AppLayout() {
                     to="settings"
                     label="설정"
                     icon={
-                      <svg viewBox="0 0 24 24" className="h-6 w-6" aria-hidden="true">
+                      <svg viewBox="0 -960 960 960" className="h-6 w-6" aria-hidden="true">
                         <path
-                          d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58c.18-.14.23-.4.12-.61l-1.92-3.32c-.11-.21-.36-.3-.58-.22l-2.39.96c-.5-.38-1.04-.69-1.63-.92l-.36-2.54A.5.5 0 0 0 14.3 1h-4.6a.5.5 0 0 0-.49.42l-.36 2.54c-.59.23-1.13.54-1.63.92l-2.39-.96c-.22-.09-.47.01-.58.22L1.33 9.46c-.11.21-.06.47.12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58c-.18.14-.23.4-.12.61l1.92 3.32c.11.21.36.3.58.22l2.39-.96c.5.38 1.04.69 1.63.92l.36 2.54c.04.24.25.42.49.42h4.6c.24 0 .45-.18.49-.42l.36-2.54c.59-.23 1.13-.54 1.63-.92l2.39.96c.22.09.47-.01.58-.22l1.92-3.32c.11-.21.06-.47-.12-.61l-2.03-1.58zM12 15.5A3.5 3.5 0 1 1 12 8a3.5 3.5 0 0 1 0 7.5z"
+                          d="m370-80-16-128q-13-5-24.5-12T307-235l-119 50L78-375l103-78q-1-7-1-13.5v-27q0-6.5 1-13.5L78-585l110-190 119 50q11-8 23-15t24-12l16-128h220l16 128q13 5 24.5 12t22.5 15l119-50 110 190-103 78q1 7 1 13.5v27q0 6.5-2 13.5l103 78-110 190-118-50q-11 8-23 15t-24 12L590-80H370Zm112-260q58 0 99-41t41-99q0-58-41-99t-99-41q-59 0-99.5 41T342-480q0 58 40.5 99t99.5 41Z"
                           fill="currentColor"
                         />
                       </svg>
@@ -538,12 +733,14 @@ export function AppLayout() {
         onClose={() => {
           setSubjectDialogOpen(false)
           setPendingTaskCreate(null)
+          setSubjectDialogForTaskCreate(false)
         }}
         onAfterAdd={(subjectId) => {
           const pending = pendingTaskCreate
           setSubjectDialogOpen(false)
           setPendingTaskCreate(null)
-          setTaskDialogRequest({ mode: 'add', subjectId, date: pending?.date })
+          if (subjectDialogForTaskCreate) setTaskDialogRequest({ mode: 'add', subjectId, date: pending?.date })
+          setSubjectDialogForTaskCreate(false)
         }}
       />
     </TaskDialogContext.Provider>
@@ -584,7 +781,7 @@ function BottomNavItem({
             </div>
             <div className={`text-[11px] font-semibold tracking-tight ${on ? 'text-slate-900' : 'text-slate-400'}`}>{label}</div>
             <div
-              className={`absolute bottom-0 h-1 w-10 rounded-full bg-slate-900 transition-opacity ${
+              className={`absolute bottom-0 h-1 w-10 rounded-full bg-black/80 transition-opacity ${
                 on ? 'opacity-100' : 'opacity-0'
               }`}
               aria-hidden="true"

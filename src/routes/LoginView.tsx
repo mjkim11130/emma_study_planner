@@ -29,7 +29,7 @@ export function LoginView() {
         <Card>
           <CardHeader title="로그인 완료" subtitle="이미 로그인되어 있어요." />
           <div className="px-4 pb-4">
-            <Button onClick={() => navigate('/calendar', { replace: true })}>계속하기</Button>
+            <Button onClick={() => navigate('/', { replace: true })}>계속하기</Button>
           </div>
         </Card>
       </div>
@@ -81,7 +81,7 @@ export function LoginView() {
                 if (mode === 'signin') {
                   const { error } = await supabase.auth.signInWithPassword({ email: e, password })
                   if (error) throw error
-                  navigate('/calendar', { replace: true })
+                  navigate('/', { replace: true })
                 } else {
                   // Supabase may create a session immediately depending on project settings.
                   // To avoid accidentally carrying over an existing session, explicitly sign out first.
@@ -89,7 +89,7 @@ export function LoginView() {
                   const { error } = await supabase.auth.signUp({ email: e, password })
                   if (error) throw error
                   setMessage('가입이 완료되었습니다. 자동으로 로그인될 수 있어요. 계속하기를 눌러주세요.')
-                  navigate('/calendar', { replace: true })
+                  navigate('/', { replace: true })
                 }
               } catch (err) {
                 const msg = err instanceof Error ? err.message : '로그인/가입에 실패했습니다.'

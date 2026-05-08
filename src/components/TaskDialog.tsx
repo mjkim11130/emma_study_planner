@@ -41,9 +41,10 @@ function secondsBetweenHm(startHm?: string | null, endHm?: string | null) {
   const start = hmToMinutes(startHm ?? null)
   const end = hmToMinutes(endHm ?? null)
   if (start === null || end === null) return null
-  // treat equal as "no duration" (start-only), and disallow end earlier than start
-  if (end <= start) return null
-  return (end - start) * 60
+  // treat equal as "no duration" (start-only)
+  if (end === start) return null
+  const diffMin = end > start ? end - start : end + 24 * 60 - start
+  return diffMin * 60
 }
 
 function formatMeridiemHm(hm?: string) {
@@ -158,7 +159,7 @@ function CompareRail({
       <div className="grid grid-cols-[46px_minmax(0,1fr)_98px] items-center gap-3">
         <span className="text-sm font-semibold text-slate-900">완료</span>
         <div className="h-3.5 overflow-hidden">
-          <div className="h-full rounded-full bg-slate-900" style={{ width: actualWidth }} />
+          <div className="h-full rounded-full bg-black/80" style={{ width: actualWidth }} />
         </div>
         <span className="text-right text-[15px] font-semibold tabular-nums text-slate-900">{actualLabel}</span>
       </div>
@@ -202,6 +203,7 @@ export function TaskDialog() {
   const [editTitleSample, setEditTitleSample] = useState('제목 추가')
   const editTitleOriginalRef = useRef<{ taskId: string; title: string } | null>(null)
   const [editValidationMessage, setEditValidationMessage] = useState<string | null>(null)
+  const [editWarningMessage, setEditWarningMessage] = useState<string | null>(null)
 
   const [datePickerField, setDatePickerField] = useState<null | 'date' | 'dueDate'>(null)
   const [calendarMonth, setCalendarMonth] = useState(() => new Date())
@@ -681,6 +683,7 @@ export function TaskDialog() {
                     </div>
 
                     {editValidationMessage ? <div className="text-sm font-semibold text-rose-700">{editValidationMessage}</div> : null}
+                    {editWarningMessage ? <div className="text-sm font-semibold text-amber-700">{editWarningMessage}</div> : null}
 
                     <div className="flex min-w-0 flex-nowrap items-center gap-2 text-base font-medium text-slate-700">
                         <span className="shrink-0 whitespace-nowrap rounded-full bg-slate-100 px-3 py-1.5 text-sm font-semibold text-slate-500">계획</span>
@@ -711,7 +714,7 @@ export function TaskDialog() {
                       <DurationPickerButton
                         valueSeconds={plannedSecondsDraft}
                         onChangeSeconds={(nextSeconds) => setPlannedSecondsDraft(nextSeconds)}
-                        maxHours={99}
+                        maxHours={10}
                         buttonLabel={plannedSecondsDraft > 0 ? formatDurationPreciseKo(plannedSecondsDraft) : '소요시간 입력'}
                         buttonClassName={`min-w-0 cursor-pointer truncate whitespace-nowrap text-left text-base font-medium tracking-[-0.02em] underline decoration-dotted underline-offset-4 transition md:tracking-[-0.04em] ${
                           plannedSecondsDraft > 0 ? 'text-slate-700 decoration-slate-200 hover:decoration-slate-400' : 'text-slate-400 decoration-slate-200 hover:decoration-slate-300'
@@ -759,7 +762,7 @@ export function TaskDialog() {
 
                     <div className="flex flex-col gap-2 md:flex-row md:items-center">
                       <div className="flex min-w-0 flex-nowrap items-center gap-3 text-base font-medium text-slate-700 md:flex-1">
-                        <span className="shrink-0 whitespace-nowrap rounded-full bg-slate-900 px-3 py-1.5 text-sm font-semibold text-white">완료</span>
+                        <span className="shrink-0 whitespace-nowrap rounded-full bg-black/80 px-3 py-1.5 text-sm font-semibold text-white">완료</span>
                         {previewTask.recordCompleteOnly &&
                         !previewTask.actualStartTime &&
                         !previewTask.actualEndTime &&
@@ -803,7 +806,7 @@ export function TaskDialog() {
                             <DurationPickerButton
                               valueSeconds={actualSecondsDraft}
                               onChangeSeconds={(nextSeconds) => setActualSecondsDraft(nextSeconds)}
-                              maxHours={99}
+                              maxHours={10}
                               buttonLabel={actualSecondsDraft > 0 ? formatDurationPreciseKo(actualSecondsDraft) : '소요시간 입력'}
                               buttonClassName={`min-w-0 cursor-pointer truncate whitespace-nowrap text-left text-base font-medium tracking-[-0.02em] underline decoration-dotted underline-offset-4 transition md:tracking-[-0.04em] ${
                                 actualSecondsDraft > 0 ? 'text-slate-700 decoration-slate-200 hover:decoration-slate-400' : 'text-slate-400 decoration-slate-200 hover:decoration-slate-300'
@@ -922,7 +925,7 @@ export function TaskDialog() {
                         >
                           <span
                             className={`shrink-0 whitespace-nowrap rounded-full px-3 py-1.5 text-sm font-semibold ${
-                            item.kind === '완료' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-500'
+                            item.kind === '완료' ? 'bg-black/80 text-white' : 'bg-slate-100 text-slate-500'
                             }`}
                           >
                             {item.badge}
@@ -962,6 +965,7 @@ export function TaskDialog() {
                 type="button"
                 onClick={() => {
                   if (!previewTask) return
+                  setEditWarningMessage(null)
                   const draft = editTitleDraft.trim()
                   const original = (editTitleOriginalRef.current?.taskId === previewTask.id ? editTitleOriginalRef.current.title : previewTask.title ?? '').trim()
                   const addFallbackTitle = buildNextTaskTitle((previewSubject?.name ?? '').trim(), tasks)
@@ -971,9 +975,17 @@ export function TaskDialog() {
                   }
                   const start = hmToMinutes(previewTask.actualStartTime ?? null)
                   const end = hmToMinutes(previewTask.actualEndTime ?? null)
-                  if (start !== null && end !== null && end <= start) {
-                    setEditValidationMessage('완료 종료시간이 시작시간보다 빨라요.')
-                    return
+                  if (start !== null && end !== null) {
+                    if (end === start) {
+                      setEditValidationMessage('완료 종료시간을 시작시간과 동일하게 설정할 수 없어요.')
+                      return
+                    }
+                    const diffMin = end > start ? end - start : end + 24 * 60 - start
+                    if (diffMin > 10 * 60) {
+                      setEditValidationMessage('완료 시작/종료 간격이 10시간을 넘어서 저장할 수 없어요.')
+                      return
+                    }
+                    if (end < start) setEditWarningMessage('종료시간이 시작시간보다 빨라서, 다음날까지 진행한 것으로 계산돼요.')
                   }
                   setEditValidationMessage(null)
                   if (isAddMode) {
@@ -990,7 +1002,7 @@ export function TaskDialog() {
                   setEditDraft(null)
                   if (autoCloseAfterCompleteTaskId === previewTask.id) setAutoCloseAfterCompleteTaskId(null)
                 }}
-                className="inline-flex h-10 w-full items-center justify-center rounded-xl bg-slate-900 px-3 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:bg-slate-300"
+                className="inline-flex h-10 w-full items-center justify-center rounded-xl bg-black/80 px-3 py-2 text-sm font-medium text-white transition hover:bg-black/70 disabled:bg-black/30"
               >
                 {isAddMode ? '등록' : '완료'}
               </button>
@@ -1026,7 +1038,7 @@ export function TaskDialog() {
               <button
                 type="button"
                 onClick={() => setTimerTaskId(previewTask.id)}
-                className="inline-flex h-10 items-center justify-center rounded-xl bg-slate-900 px-3 text-sm font-semibold text-white transition hover:bg-slate-800"
+                className="inline-flex h-10 items-center justify-center rounded-xl bg-black/80 px-3 text-sm font-semibold text-white transition hover:bg-black/70"
               >
                 타이머
               </button>
@@ -1156,6 +1168,7 @@ export function TaskDialog() {
           }
           onApply={(hm) => {
             if (!previewTask) return
+            setEditWarningMessage(null)
             if (timePickerField === 'actualStartTime') {
               const startMin = hmToMinutes(hm)
               if (startMin === null) return
@@ -1172,7 +1185,10 @@ export function TaskDialog() {
               if (endMin === null) return
               if (startMin !== null) {
                 if (endMin === startMin) return
-                const nextSeconds = Math.max(0, (endMin - startMin) * 60)
+                const diffMin = endMin > startMin ? endMin - startMin : endMin + 24 * 60 - startMin
+                if (diffMin > 10 * 60) return
+                if (endMin < startMin) setEditWarningMessage('종료시간이 시작시간보다 빨라서, 다음날까지 진행한 것으로 계산돼요.')
+                const nextSeconds = Math.max(0, diffMin * 60)
                 setActualSecondsDraft(nextSeconds)
                 patchPreviewTask({
                   actualEndTime: hm,
@@ -1186,7 +1202,14 @@ export function TaskDialog() {
               patchPreviewTask({ actualStartTime: hm, actualEndTime: undefined, actualSeconds: undefined, recordCompleteOnly: false, status: 'completed' })
             } else if (timePickerField === 'plannedEndTime') {
               if (!previewTask.plannedStartTime) return
-              const nextSeconds = secondsBetweenHm(previewTask.plannedStartTime, hm) ?? 0
+              const startMin = hmToMinutes(previewTask.plannedStartTime ?? null)
+              const endMin = hmToMinutes(hm)
+              if (startMin === null || endMin === null) return
+              if (endMin === startMin) return
+              const diffMin = endMin > startMin ? endMin - startMin : endMin + 24 * 60 - startMin
+              if (diffMin > 10 * 60) return
+              if (endMin < startMin) setEditWarningMessage('종료시간이 시작시간보다 빨라서, 다음날까지 진행한 것으로 계산돼요.')
+              const nextSeconds = diffMin * 60
               setPlannedSecondsDraft(nextSeconds)
               patchPreviewTask({ plannedSeconds: nextSeconds })
             } else {
@@ -1208,21 +1231,36 @@ export function TaskDialog() {
             if (proposedMin === null) return null
             if (timePickerField === 'actualStartTime') {
               const endMin = hmToMinutes(previewTask?.actualEndTime ?? null)
-              if (endMin !== null && endMin < proposedMin) return '종료시간이 시작시간보다 빨라요.'
+              if (endMin !== null) {
+                if (endMin === proposedMin) return '종료시간을 시작시간과 동일하게 설정할 수 없어요.'
+                const diffMin = endMin > proposedMin ? endMin - proposedMin : endMin + 24 * 60 - proposedMin
+                if (diffMin > 10 * 60) return '시작/종료 간격이 10시간을 넘어서 저장할 수 없어요.'
+              }
             }
             if (timePickerField === 'actualEndTime') {
               const startMin = hmToMinutes(previewTask?.actualStartTime ?? null)
-              if (startMin !== null && proposedMin < startMin) return '종료시간이 시작시간보다 빨라요.'
               if (startMin !== null && proposedMin === startMin) return '종료시간을 시작시간과 동일하게 설정할 수 없어요.'
+              if (startMin !== null) {
+                const diffMin = proposedMin > startMin ? proposedMin - startMin : proposedMin + 24 * 60 - startMin
+                if (diffMin > 10 * 60) return '시작/종료 간격이 10시간을 넘어서 저장할 수 없어요.'
+              }
             }
             if (timePickerField === 'plannedEndTime') {
               const startMin = hmToMinutes(previewTask?.plannedStartTime ?? null)
-              if (startMin !== null && proposedMin < startMin) return '종료시간이 시작시간보다 빨라요.'
+              if (startMin !== null) {
+                if (proposedMin === startMin) return '종료시간을 시작시간과 동일하게 설정할 수 없어요.'
+                const diffMin = proposedMin > startMin ? proposedMin - startMin : proposedMin + 24 * 60 - startMin
+                if (diffMin > 10 * 60) return '시작/종료 간격이 10시간을 넘어서 저장할 수 없어요.'
+              }
             }
             if (timePickerField === 'plannedStartTime') {
               const endHm = previewTask?.plannedStartTime && plannedSecondsDraft > 0 ? addSecondsToHm(previewTask.plannedStartTime, plannedSecondsDraft) : null
               const endMin = hmToMinutes(endHm ?? null)
-              if (endMin !== null && endMin < proposedMin) return '종료시간이 시작시간보다 빨라요.'
+              if (endMin !== null) {
+                if (endMin === proposedMin) return '종료시간을 시작시간과 동일하게 설정할 수 없어요.'
+                const diffMin = endMin > proposedMin ? endMin - proposedMin : endMin + 24 * 60 - proposedMin
+                if (diffMin > 10 * 60) return '시작/종료 간격이 10시간을 넘어서 저장할 수 없어요.'
+              }
             }
             return null
           }}

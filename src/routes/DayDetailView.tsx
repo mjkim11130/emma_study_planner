@@ -11,15 +11,10 @@ import { TimePickerModal } from '../components/TimePicker'
 
 function UnscheduledBubbleIcon() {
   return (
-    <svg viewBox="0 0 64 64" aria-hidden="true" className="h-8 w-8 text-slate-800">
-      <rect x="10" y="10" width="44" height="44" rx="10" fill="#f1f5f9" />
+    <svg viewBox="0 -960 960 960" aria-hidden="true" className="h-8 w-8 text-slate-800">
       <path
-        d="M20 24h24M20 32h24M20 40h24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="4"
-        strokeLinecap="round"
-        strokeLinejoin="round"
+        d="M612-292 440-464v-216h80v184l148 148-56 56Zm-498-25q-13-29-21-60t-11-63h81q3 21 8.5 42t13.5 41l-71 40ZM82-520q3-32 11-63.5t22-60.5l70 40q-8 20-13.5 41t-8.5 43H82Zm165 366q-27-20-50-43.5T154-248l70-40q14 18 29.5 33.5T287-225l-40 71Zm-22-519-71-40q20-27 43-50t50-43l40 71q-17 14-32.5 29.5T225-673ZM440-82q-32-3-63.5-11T316-115l40-70q20 8 41 13.5t43 8.5v81Zm-84-693-40-70q29-14 60.5-22t63.5-11v81q-22 3-43 8.5T356-775ZM520-82v-81q22-3 43-8.5t41-13.5l40 70q-29 14-60.5 22T520-82Zm84-693q-20-8-41-13.5t-43-8.5v-81q32 3 63.5 11t60.5 22l-40 70Zm109 621-40-71q17-14 32.5-29.5T735-287l71 40q-20 27-43 50.5T713-154Zm22-519q-14-17-29.5-32.5T673-735l40-71q27 19 50 42t42 50l-70 41Zm62 153q-3-22-8.5-43T775-604l70-41q13 30 21.5 61.5T878-520h-81Zm48 204-70-40q8-20 13.5-41t8.5-43h81q-3 32-11 63.5T845-316Z"
+        fill="currentColor"
       />
     </svg>
   )
@@ -204,7 +199,7 @@ export function DayDetailView() {
   const lastUsedSubjectIdByExam = usePlannerStore((s) => s.lastUsedSubjectIdByExam)
   const params = useParams()
   const date = params.date ?? ''
-  if (!date) return <Navigate to="/calendar" replace />
+  if (!date) return <Navigate to="/" replace />
   const activeExamId = usePlannerStore((s) => s.activeExamId)
   const subjects = usePlannerStore((s) => s.subjects)
   const allTasks = usePlannerStore((s) => s.tasks)
@@ -216,6 +211,20 @@ export function DayDetailView() {
   const [timelineTimePickerField, setTimelineTimePickerField] = useState<null | 'start' | 'end'>(null)
   const [unscheduledDock, setUnscheduledDock] = useState<{ v: 'top' | 'bottom'; h: 'right' }>({ v: 'bottom', h: 'right' })
   const topDockY = 64
+  const [isXlUp, setIsXlUp] = useState(false)
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return
+    const mq = window.matchMedia('(min-width: 1280px)')
+    const onChange = () => setIsXlUp(Boolean(mq.matches))
+    onChange()
+    if (typeof mq.addEventListener === 'function') {
+      mq.addEventListener('change', onChange)
+      return () => mq.removeEventListener('change', onChange)
+    }
+    // Safari fallback
+    mq.addListener(onChange)
+    return () => mq.removeListener(onChange)
+  }, [])
   const dockDragRef = useRef<{
     isDragging: boolean
     startX: number
@@ -560,10 +569,21 @@ export function DayDetailView() {
 
   const listPanel = (mode: 'planned' | 'completed') => (
     <div className="px-4 md:px-3">
-      <div className="mb-2 hidden xl:flex items-center">
-        <span className="rounded-full bg-slate-900 px-3 py-1 text-[12px] font-semibold text-white">
-          {mode === 'completed' ? '완료' : '계획'}
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <span className="hidden xl:flex items-center gap-3">
+          <span className="text-2xl font-bold tracking-tight text-slate-900">
+            {mode === 'completed' ? '완료' : '계획'}
+          </span>
         </span>
+        <span className="xl:hidden" />
+        <button
+          type="button"
+          onClick={() => openTaskAdd({ date })}
+          className="inline-flex h-9 items-center justify-center rounded-xl bg-black/80 px-3 text-sm font-semibold text-white hover:bg-black/70"
+          aria-label={`${mode === 'completed' ? '완료' : '계획'} 일정 추가`}
+        >
+          + 일정 추가
+        </button>
       </div>
       <div className="space-y-4">
         {listGroups
@@ -578,7 +598,10 @@ export function DayDetailView() {
           .filter((g) => g.items.length > 0)
           .map((g) => (
           <div key={g.subjectId}>
-            <div className="mb-2 text-sm font-semibold text-slate-900">{g.subjectName}</div>
+            <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-900">
+              <span className="h-4 w-1.5 rounded-none" style={{ background: g.subjectColor }} aria-hidden="true" />
+              <span className="min-w-0 truncate">{g.subjectName}</span>
+            </div>
             <div className="divide-y divide-slate-200 overflow-hidden rounded-xl border border-slate-200 bg-white">
               {g.items.map((t) => {
                 const hasAnyRecord = Boolean(t.actualStartTime || t.actualEndTime || typeof t.actualSeconds === 'number')
@@ -786,7 +809,7 @@ export function DayDetailView() {
               const leftPct = (clamped / 3) * 100
               return (
                 <div
-                  className="absolute bottom-0 h-[3px] w-1/3 bg-slate-900"
+                  className="absolute bottom-0 h-[3px] w-1/3 bg-black/80"
                   style={{
                     left: `${leftPct}%`,
                     transition: dayIsSwiping ? 'none' : 'left 220ms cubic-bezier(0.16, 1, 0.3, 1)',
@@ -838,7 +861,9 @@ export function DayDetailView() {
               </Button>
             }
             bottom={
-              <div className="xl:hidden">{dayTabs}</div>
+              <div className="xl:hidden">
+                {dayTabs}
+              </div>
             }
           />
         )
@@ -1007,7 +1032,7 @@ export function DayDetailView() {
         onClose={() => setTimelineTimePickerOpen(false)}
       />
 
-      {dayViewMode === 'timeline' ? (
+      {dayViewMode === 'timeline' && !isXlUp ? (
         <div
           data-unscheduled-dock-root
           className={`fixed z-40 flex items-start justify-end gap-[10px] md:hidden ${unscheduledDockOrigin}`}
@@ -1022,7 +1047,7 @@ export function DayDetailView() {
           {!unscheduledOpen ? (
             <button
               type="button"
-              className="flex h-[64px] w-[64px] items-center justify-center rounded-full bg-slate-900 text-white shadow-xl ring-1 ring-black/10"
+              className="flex h-[64px] w-[64px] items-center justify-center rounded-full bg-black/80 text-white shadow-xl ring-1 ring-black/10"
               onClick={createTaskAndClose}
               aria-label="일정 추가"
             >
@@ -1063,7 +1088,7 @@ export function DayDetailView() {
               <div className="relative">
                 <UnscheduledBubbleIcon />
                 {dayUnscheduled.length ? (
-                  <div className="absolute -right-2.5 -top-2.5 min-w-[18px] rounded-full bg-slate-900 px-1.5 py-0.5 text-center text-[11px] font-semibold leading-none text-white tabular-nums shadow-sm">
+                  <div className="absolute -right-2.5 -top-2.5 min-w-[18px] rounded-full bg-black/80 px-1.5 py-0.5 text-center text-[11px] font-semibold leading-none text-white tabular-nums shadow-sm">
                     {dayUnscheduled.length > 99 ? '99+' : dayUnscheduled.length}
                   </div>
                 ) : null}

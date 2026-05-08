@@ -63,6 +63,7 @@ export function SubjectDialog({
   const [nameSample, setNameSample] = useState('주제 추가')
   const [color, setColor] = useState('#2563eb')
   const [archived, setArchived] = useState(false)
+  const [isRest, setIsRest] = useState(false)
 
   useEffect(() => {
     if (!open) return
@@ -70,12 +71,14 @@ export function SubjectDialog({
       setName(subject.name)
       setColor(subject.color)
       setArchived(Boolean(subject.archived))
+      setIsRest(Boolean(subject.isRest))
       setNameSample(subject.name?.trim() || '주제 추가')
       return
     }
     setName('')
     setColor(pickDefaultColor(subjects.filter((s) => s.examId === activeExamId)))
     setArchived(false)
+    setIsRest(false)
     setNameSample('주제 추가')
   }, [open, mode, subject])
 
@@ -120,14 +123,18 @@ export function SubjectDialog({
           </button>
         </div>
 
-        {mode === 'edit' ? (
-          <div className="mt-4 flex justify-end">
+        <div className="mt-4 flex flex-col items-end gap-2">
+          <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+            <input type="checkbox" checked={isRest} onChange={(e) => setIsRest(e.target.checked)} />
+            통계에 포함하지 않기
+          </label>
+          {mode === 'edit' ? (
             <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
               <input type="checkbox" checked={archived} onChange={(e) => setArchived(e.target.checked)} />
               보관처리
             </label>
-          </div>
-        ) : null}
+          ) : null}
+        </div>
       </div>
 
       <div className="sticky bottom-0 border-t border-slate-100 bg-white/95 px-5 py-4 backdrop-blur md:px-6">
@@ -139,10 +146,10 @@ export function SubjectDialog({
                 if (!subject) return
                 const scoped = subjects.filter((s) => s.examId === activeExamId)
                 const nextName = name.trim() || pickNextTopicName(scoped)
-                updateSubject(subject.id, { name: nextName, color, archived })
+                updateSubject(subject.id, { name: nextName, color, archived, isRest })
                 onClose()
               }}
-              className="inline-flex h-10 w-full items-center justify-center rounded-xl bg-slate-900 px-3 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:bg-slate-300"
+              className="inline-flex h-10 w-full items-center justify-center rounded-xl bg-black/80 px-3 py-2 text-sm font-medium text-white transition hover:bg-black/70 disabled:bg-black/30"
             >
               완료
             </button>
@@ -172,7 +179,7 @@ export function SubjectDialog({
                 if (created) onAfterAdd?.(created)
                 onClose()
               }}
-              className="inline-flex h-10 w-full items-center justify-center rounded-xl bg-slate-900 px-3 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:bg-slate-300"
+              className="inline-flex h-10 w-full items-center justify-center rounded-xl bg-black/80 px-3 py-2 text-sm font-medium text-white transition hover:bg-black/70 disabled:bg-black/30"
             >
               등록
             </button>

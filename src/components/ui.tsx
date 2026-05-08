@@ -28,7 +28,7 @@ export function Button({
   const base = 'inline-flex items-center justify-center rounded-xl px-3 py-2 text-sm font-medium transition'
   const styles =
     variant === 'primary'
-      ? 'bg-slate-900 text-white hover:bg-slate-800 disabled:bg-slate-300'
+      ? 'bg-black/80 text-white hover:bg-black/70 disabled:bg-black/30'
       : variant === 'secondary'
         ? 'bg-slate-100 text-slate-900 hover:bg-slate-200 disabled:bg-slate-100 disabled:text-slate-400'
         : variant === 'danger'

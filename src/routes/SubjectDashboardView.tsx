@@ -1,4 +1,4 @@
-import { addDays, endOfMonth, endOfWeek, format, isWithinInterval, parseISO, startOfMonth, startOfWeek } from 'date-fns'
+import { addDays, addMonths, endOfMonth, endOfWeek, format, isWithinInterval, parseISO, startOfMonth, startOfWeek } from 'date-fns'
 import { ko } from 'date-fns/locale'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { MobileTopBar } from '../components/MobileTopBar'
@@ -332,8 +332,8 @@ function formatPeriodLabel(period: Period) {
   return `${startFmt} - ${endFmt}`
 }
 
-function getPeriodRange(period: Period) {
-  const today = parseISO(todayYmd())
+function getPeriodRange(period: Period, baseDate = parseISO(todayYmd())) {
+  const today = baseDate
   if (period === 'all' || period === 'archive') return null
   if (period === 'today') {
     const ymd = format(today, 'yyyy-MM-dd')
@@ -344,14 +344,14 @@ function getPeriodRange(period: Period) {
     const end = endOfMonth(today)
     return { start, end, ymdStart: format(start, 'yyyy-MM-dd'), ymdEnd: format(end, 'yyyy-MM-dd') }
   }
-  const start = startOfWeek(today, { weekStartsOn: 0 })
-  const end = endOfWeek(today, { weekStartsOn: 0 })
+  const start = startOfWeek(today, { weekStartsOn: 1 })
+  const end = endOfWeek(today, { weekStartsOn: 1 })
   return { start, end, ymdStart: format(start, 'yyyy-MM-dd'), ymdEnd: format(end, 'yyyy-MM-dd') }
 }
 
-function withinPeriodDate(ymd: string, period: Period) {
+function withinPeriodDate(ymd: string, period: Period, baseDate = parseISO(todayYmd())) {
   if (!ymd) return false
-  const range = getPeriodRange(period)
+  const range = getPeriodRange(period, baseDate)
   if (!range) return true
   return isWithinInterval(parseISO(ymd), { start: range.start, end: addDays(range.end, 1) })
 }
@@ -537,7 +537,7 @@ function TaskRow({ t, subjectColor, onOpen }: { t: StudyTask; subjectColor: stri
   )
 }
 
-function buildSubjectBuckets(subjectTasks: StudyTask[], period: Period) {
+function buildSubjectBuckets(subjectTasks: StudyTask[], period: Period, baseDate = parseISO(todayYmd())) {
   const nowYmd = todayYmd()
 
   const completed: StudyTask[] = []
@@ -548,7 +548,7 @@ function buildSubjectBuckets(subjectTasks: StudyTask[], period: Period) {
   for (const t of subjectTasks) {
     const completedFlag = isTaskCompleted(t)
     const hasDate = Boolean(t.date)
-    const isInPeriod = !hasDate ? true : withinPeriodDate(t.date, period)
+    const isInPeriod = !hasDate ? true : withinPeriodDate(t.date, period, baseDate)
 
     if (!isInPeriod) continue
 
@@ -605,6 +605,7 @@ function SubjectCard({
   subject,
   tasks,
   period,
+  baseDate,
   onEditSubject,
   onOpenTask,
   onAddTask,
@@ -614,13 +615,14 @@ function SubjectCard({
   subject: Subject
   tasks: StudyTask[]
   period: Period
+  baseDate: Date
   onEditSubject: () => void
   onOpenTask: (taskId: string) => void
   onAddTask: () => void
   limit: number | null
   forceExpanded?: boolean
 }) {
-  const buckets = useMemo(() => buildSubjectBuckets(tasks, period), [tasks, period])
+  const buckets = useMemo(() => buildSubjectBuckets(tasks, period, baseDate), [tasks, period, baseDate])
   const plannedSecondsCompletedOnly = buckets.completed.reduce((acc, t) => {
     const v = typeof t.plannedSeconds === 'number' && Number.isFinite(t.plannedSeconds) ? t.plannedSeconds : 0
     return acc + Math.max(0, v)
@@ -722,7 +724,11 @@ function SubjectCard({
   }
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white p-3">
+    <div
+      className={`overflow-hidden rounded-2xl border border-slate-200 bg-white p-3 ${
+        subject.isRest ? 'opacity-60 saturate-50' : ''
+      }`}
+    >
       <div className="w-full text-left">
         <div className="flex w-full min-w-0 items-center justify-between gap-3 py-1.5 pl-1.5">
           <div className="flex min-w-0 items-center gap-2">
@@ -735,7 +741,7 @@ function SubjectCard({
               <span className="text-[15px] font-semibold text-slate-900">{plannedCount}개</span>
             </span>
             <span className="inline-flex items-center gap-2">
-              <span className="rounded-full bg-slate-900 px-2 py-0.5 text-white">완료</span>
+              <span className="rounded-full bg-black/80 px-2 py-0.5 text-white">완료</span>
               <span className="text-[15px] font-semibold text-slate-900">{completedCount}개</span>
             </span>
           </div>
@@ -760,7 +766,7 @@ function SubjectCard({
               <div className="grid grid-cols-[40px_minmax(0,1fr)_auto] items-center gap-2">
                 <span className="text-sm font-semibold text-slate-900">완료</span>
                 <div className="h-1.5 w-full overflow-hidden rounded-full">
-                  <div className="h-full rounded-full bg-slate-900" style={{ width: `${completedPct}%` }} />
+                  <div className="h-full rounded-full bg-black/80" style={{ width: `${completedPct}%` }} />
                 </div>
                 <span className="ml-2 text-right text-[15px] font-semibold tabular-nums text-slate-900">
                   {formatDurationKo(completedSecondsCompletedOnly)}
@@ -790,7 +796,7 @@ function SubjectCard({
           { key: 'completed', node: section('completed', '✔️ 완료', buckets.completed, 'completed') },
           { key: 'planned', node: section('planned', '📆 다가오는 계획', buckets.planned, 'planned') },
           { key: 'past', node: section('past', '💾 지나간 계획', buckets.past, 'muted') },
-          { key: 'upcoming', node: section('upcoming', '💭 시작 예정', buckets.upcoming, 'muted') },
+          { key: 'upcoming', node: section('upcoming', '💭 날짜 미정', buckets.upcoming, 'muted') },
         ]}
       />
 
@@ -806,8 +812,7 @@ function SubjectCard({
         <button
           type="button"
           onClick={onAddTask}
-          className="inline-flex h-10 flex-1 items-center justify-center rounded-xl px-4 text-sm font-semibold transition hover:opacity-90"
-          style={{ background: '#0f172a', color: '#ffffff' }}
+          className="inline-flex h-10 flex-1 items-center justify-center rounded-xl bg-black/80 px-4 text-sm font-semibold text-white transition hover:bg-black/70"
         >
           + 일정 추가
         </button>
@@ -855,7 +860,10 @@ export function SubjectDashboardView() {
   }
 
   const [period, setPeriod] = useState<Period>('week')
+  const [cursorYmd, setCursorYmd] = useState(() => todayYmd())
   const [query, setQuery] = useState('')
+
+  const cursorDate = useMemo(() => parseISO(cursorYmd), [cursorYmd])
 
   // mobile swipe tabs (same UX as day topbar tabs)
   const dashSwipeRef = useRef<{ isDown: boolean; startX: number; startY: number }>({ isDown: false, startX: 0, startY: 0 })
@@ -947,7 +955,8 @@ export function SubjectDashboardView() {
   const aggregate = useMemo(() => {
     if (period === 'archive') return null
     const nonArchivedSubjects = scopedSubjects.filter((s) => !s.archived)
-    const nonArchivedSubjectIds = new Set(nonArchivedSubjects.map((s) => s.id))
+    const countableSubjects = nonArchivedSubjects.filter((s) => !s.isRest)
+    const nonArchivedSubjectIds = new Set(countableSubjects.map((s) => s.id))
     let plannedCount = 0
     let completedCount = 0
     let plannedSecondsCompletedOnly = 0
@@ -956,7 +965,7 @@ export function SubjectDashboardView() {
     const completedBySubject: Array<{ subjectId: string; seconds: number; color: string }> = []
     for (const subjectId of nonArchivedSubjectIds) {
       const list = tasksBySubject.get(subjectId) ?? []
-      const buckets = buildSubjectBuckets(list, period)
+      const buckets = buildSubjectBuckets(list, period, cursorDate)
       completedCount += buckets.completed.length
       plannedCount += buckets.planned.length + buckets.past.length + buckets.upcoming.length
       const plannedSec = buckets.completed.reduce((acc, t) => {
@@ -971,7 +980,7 @@ export function SubjectDashboardView() {
       }, 0)
       plannedSecondsCompletedOnly += plannedSec
       completedSecondsCompletedOnly += completedSec
-      const color = nonArchivedSubjects.find((s) => s.id === subjectId)?.color ?? '#94a3b8'
+      const color = countableSubjects.find((s) => s.id === subjectId)?.color ?? '#94a3b8'
       if (plannedSec > 0) plannedBySubject.push({ subjectId, seconds: plannedSec, color })
       if (completedSec > 0) completedBySubject.push({ subjectId, seconds: completedSec, color })
     }
@@ -1005,7 +1014,7 @@ export function SubjectDashboardView() {
       varianceSeconds,
       varianceLabel,
     }
-  }, [period, scopedSubjects, tasksBySubject])
+  }, [period, scopedSubjects, tasksBySubject, cursorDate])
 
   const completedLegend = useMemo(() => {
     if (!aggregate?.completedBySubject?.length) return []
@@ -1040,13 +1049,38 @@ export function SubjectDashboardView() {
     })
   }, [scopedSubjectsOrdered, period, queryNorm, matchedTaskIdsBySubject])
 
-  const pageTitle = '주제별'
+  const topTitle = useMemo(() => {
+    if (period === 'archive') return '보관'
+    if (period === 'all') return '전체기간'
+    if (period === 'month') return format(cursorDate, 'yyyy년 M월')
+    if (period === 'today') return format(cursorDate, 'yyyy년 M월 d일')
+    // week
+    const range = getPeriodRange('week', cursorDate)
+    if (!range) return ''
+    const weekIndex = Math.max(1, Math.floor((range.start.getDate() - 1) / 7) + 1)
+    return `${format(range.start, 'M월')} ${weekIndex}주차`
+  }, [period, cursorDate])
+
+  const shiftCursor = (dir: -1 | 1) => {
+    if (period === 'archive' || period === 'all') return
+    if (period === 'today') {
+      setCursorYmd(format(addDays(cursorDate, dir), 'yyyy-MM-dd'))
+      return
+    }
+    if (period === 'week') {
+      setCursorYmd(format(addDays(cursorDate, dir * 7), 'yyyy-MM-dd'))
+      return
+    }
+    // month
+    setCursorYmd(format(addMonths(cursorDate, dir), 'yyyy-MM-dd'))
+  }
 
   const [subjectDialogOpen, setSubjectDialogOpen] = useState(false)
   const [subjectDialogMode, setSubjectDialogMode] = useState<'add' | 'edit'>('edit')
   const [subjectDialogSubjectId, setSubjectDialogSubjectId] = useState<string | null>(null)
   const [reorderOpen, setReorderOpen] = useState(false)
   const [reorderDraft, setReorderDraft] = useState<string[]>([])
+  const [periodMenuOpen, setPeriodMenuOpen] = useState(false)
 
   useEffect(() => {
     if (!reorderOpen) return
@@ -1056,51 +1090,116 @@ export function SubjectDashboardView() {
   return (
     <div className="flex h-[calc(100dvh-72px-env(safe-area-inset-bottom))] flex-col overflow-hidden">
       <MobileTopBar
-        title={pageTitle}
+        title={topTitle}
+        left={
+          period === 'archive' || period === 'all' ? (
+            <div />
+          ) : (
+            <Button variant="secondary" onClick={() => shiftCursor(-1)}>
+              이전
+            </Button>
+          )
+        }
         right={
-          <div />
+          period === 'archive' || period === 'all' ? (
+            <div />
+          ) : (
+            <Button variant="secondary" onClick={() => shiftCursor(1)}>
+              다음
+            </Button>
+          )
         }
         bottom={
           <div>
-            {(() => {
-              const order: Period[] = ['today', 'week', 'month', 'all', 'archive']
-              const idx = order.indexOf(period)
-              const w = dashTabsW || 1
-              const progress = idx + -dashSwipeX / w
-              const clamped = Math.max(0, Math.min(order.length - 1, progress))
-              const leftPct = (clamped / order.length) * 100
-              return (
-                <div ref={dashTabsRef} className="relative flex w-full select-none items-stretch justify-between">
-                  <div
-                    className="absolute bottom-0 h-[3px] bg-slate-900"
-                    style={{
-                      width: `${100 / order.length}%`,
-                      left: `${leftPct}%`,
-                      transition: dashIsSwiping ? 'none' : 'left 220ms cubic-bezier(0.16, 1, 0.3, 1)',
-                    }}
-                    aria-hidden="true"
-                  />
-                  {[
-                    { k: 'today' as const, label: '오늘' },
-                    { k: 'week' as const, label: '주간' },
-                    { k: 'month' as const, label: '월간' },
-                    { k: 'all' as const, label: '전체' },
-                    { k: 'archive' as const, label: '보관' },
-                  ].map((t) => (
+            <div ref={dashTabsRef} className="relative flex w-full select-none items-stretch justify-between gap-2">
+              {(() => {
+                const order: Array<'week' | 'archive'> = ['week', 'archive']
+                const curKey: 'week' | 'archive' = period === 'archive' ? 'archive' : 'week'
+                const idx = order.indexOf(curKey)
+                const w = dashTabsW || 1
+                const progress = idx + -dashSwipeX / w
+                const clamped = Math.max(0, Math.min(order.length - 1, progress))
+                const leftPct = (clamped / order.length) * 100
+                return (
+                  <div className="relative flex w-full select-none items-stretch justify-between">
+                    <div
+                      className="absolute bottom-0 h-[3px] bg-black/80"
+                      style={{
+                        width: `${100 / order.length}%`,
+                        left: `${leftPct}%`,
+                        transition: dashIsSwiping ? 'none' : 'left 220ms cubic-bezier(0.16, 1, 0.3, 1)',
+                      }}
+                      aria-hidden="true"
+                    />
+                    <div className="relative flex-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          // Only open dropdown when already in week mode.
+                          if (period === 'archive') {
+                            setPeriod('week')
+                            setPeriodMenuOpen(false)
+                            return
+                          }
+                          setPeriodMenuOpen((v) => !v)
+                        }}
+                        className={`flex w-full items-center justify-center gap-1 py-2 text-center text-base font-medium ${
+                          curKey === 'week' ? 'text-slate-900' : 'text-slate-500'
+                        }`}
+                        aria-label="주간 기간 선택"
+                      >
+                        {period === 'today' ? '오늘' : period === 'week' ? '주간' : period === 'month' ? '월간' : period === 'all' ? '전체기간' : '주간'}
+                        <span aria-hidden="true" className="text-slate-400">
+                          ▾
+                        </span>
+                      </button>
+                      {curKey === 'week' && periodMenuOpen ? (
+                        <div
+                          className="absolute left-2 right-2 top-full z-50 mt-2 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl"
+                          onMouseDown={(e) => e.stopPropagation()}
+                          onTouchStart={(e) => e.stopPropagation()}
+                        >
+                          {[
+                            { k: 'today' as const, label: '오늘' },
+                            { k: 'week' as const, label: '주간' },
+                            { k: 'month' as const, label: '월간' },
+                            { k: 'all' as const, label: '전체기간' },
+                          ].map((t) => (
+                            <button
+                              key={t.k}
+                              type="button"
+                              onClick={() => {
+                                setPeriod(t.k)
+                                setPeriodMenuOpen(false)
+                                if (t.k === 'today') setCursorYmd(todayYmd())
+                              }}
+                              className={`block w-full px-4 py-3 text-left text-[15px] font-semibold ${
+                                period === t.k ? 'bg-black/80 text-white' : 'bg-white text-slate-900 hover:bg-slate-50'
+                              }`}
+                            >
+                              {t.label}
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+
                     <button
-                      key={t.k}
                       type="button"
-                      onClick={() => setPeriod(t.k)}
+                      onClick={() => {
+                        setPeriodMenuOpen(false)
+                        setPeriod('archive')
+                      }}
                       className={`flex-1 py-2 text-center text-base font-medium ${
-                        period === t.k ? 'text-slate-900' : 'text-slate-500'
+                        curKey === 'archive' ? 'text-slate-900' : 'text-slate-500'
                       }`}
                     >
-                      {t.label}
+                      보관
                     </button>
-                  ))}
-                </div>
-              )
-            })()}
+                  </div>
+                )
+              })()}
+            </div>
           </div>
         }
       />
@@ -1154,8 +1253,9 @@ export function SubjectDashboardView() {
           if (dashSwipeHostRef.current) dashSwipeHostRef.current.style.touchAction = 'pan-y'
           stopDashScrollStop()
           if (dashSwipeLockRef.current !== 'h') return
-          const order: Period[] = ['today', 'week', 'month', 'all', 'archive']
-          const idx = order.indexOf(period)
+          const order: Array<'week' | 'archive'> = ['week', 'archive']
+          const curKey: 'week' | 'archive' = period === 'archive' ? 'archive' : 'week'
+          const idx = order.indexOf(curKey)
           const threshold = Math.min(140, (dashTabsW || 360) * 0.2)
           if (dx < -threshold && idx < order.length - 1) setPeriod(order[idx + 1]!)
           else if (dx > threshold && idx > 0) setPeriod(order[idx - 1]!)
@@ -1291,7 +1391,7 @@ export function SubjectDashboardView() {
               순서 변경
             </Button>
             <Button
-              variant="secondary"
+              variant="primary"
               onClick={() => {
                 setSubjectDialogMode('add')
                 setSubjectDialogSubjectId(null)
@@ -1309,19 +1409,20 @@ export function SubjectDashboardView() {
             items={visibleSubjects.map((s) => ({
               key: s.id,
               node: (
-                <SubjectCard
-                  subject={s}
-                  tasks={
-                    queryNorm && matchedTaskIdsBySubject.has(s.id)
-                      ? (tasksBySubject.get(s.id) ?? []).filter((t) => matchedTaskIdsBySubject.get(s.id)?.has(t.id))
-                      : tasksBySubject.get(s.id) ?? []
-                  }
-                  period={period}
-                  onEditSubject={() => {
-                    setSubjectDialogMode('edit')
-                    setSubjectDialogSubjectId(s.id)
-                    setSubjectDialogOpen(true)
-                  }}
+                  <SubjectCard
+                    subject={s}
+                    tasks={
+                      queryNorm && matchedTaskIdsBySubject.has(s.id)
+                        ? (tasksBySubject.get(s.id) ?? []).filter((t) => matchedTaskIdsBySubject.get(s.id)?.has(t.id))
+                        : tasksBySubject.get(s.id) ?? []
+                    }
+                    period={period}
+                    baseDate={cursorDate}
+                    onEditSubject={() => {
+                      setSubjectDialogMode('edit')
+                      setSubjectDialogSubjectId(s.id)
+                      setSubjectDialogOpen(true)
+                    }}
                   onOpenTask={(id) => openTaskPreview(id)}
                   onAddTask={() => createTask({ subjectId: s.id })}
                   limit={3}
@@ -1372,7 +1473,7 @@ export function SubjectDashboardView() {
                   setSubjectOrder(activeExamId, reorderDraft)
                   setReorderOpen(false)
                 }}
-                className="inline-flex h-10 w-full items-center justify-center rounded-xl bg-slate-900 px-3 py-2 text-sm font-medium text-white transition hover:bg-slate-800"
+                className="inline-flex h-10 w-full items-center justify-center rounded-xl bg-black/80 px-3 py-2 text-sm font-medium text-white transition hover:bg-black/70"
               >
                 완료
               </button>
