@@ -167,6 +167,7 @@ export function WeekView() {
           e.dataTransfer.setData('text/emma-task-id', t.id)
           e.dataTransfer.effectAllowed = 'move'
         }}
+        data-task-card="true"
         className="flex w-full select-none items-center justify-between gap-2 rounded-[8px] border border-black/10 px-1.5 py-1.5 text-left text-[11px] font-semibold shadow-sm"
         style={{ backgroundColor: bg, color: onText }}
       >
@@ -190,6 +191,7 @@ export function WeekView() {
     onOpenDay,
     items,
     isToday,
+    canOpenDay = true,
   }: {
     keyId: string
     header: React.ReactNode
@@ -198,11 +200,18 @@ export function WeekView() {
     onOpenDay: () => void
     items: StudyTask[]
     isToday?: boolean
+    canOpenDay?: boolean
   }) => (
     <div
       className={`relative flex min-h-0 flex-col border border-slate-200 bg-white ${
         dragOverKey === keyId ? 'ring-2 ring-slate-400' : ''
-      } ${tone === 'muted' ? 'bg-slate-50 saturate-[0.92]' : ''}`}
+      } ${tone === 'muted' ? 'bg-slate-50 saturate-[0.92]' : ''} ${canOpenDay ? 'cursor-pointer' : ''}`}
+      onClick={(e) => {
+        if (!canOpenDay) return
+        const target = e.target as HTMLElement
+        if (target.closest('[data-task-card="true"]') || target.closest('[data-cell-action="add"]')) return
+        onOpenDay()
+      }}
       onDragOver={(e) => {
         e.preventDefault()
         setDragOverKey(keyId)
@@ -217,27 +226,34 @@ export function WeekView() {
         else updateTask(taskId, { date: keyId })
       }}
     >
-      {isToday ? <div className="pointer-events-none absolute inset-0 z-10 border-2 border-slate-900" /> : null}
-      <button
-        type="button"
-        onClick={onOpenDay}
+      {isToday ? <div className="pointer-events-none absolute inset-0 z-10 border-2 border-slate-300" /> : null}
+      <div
         className={`relative z-0 flex items-center justify-between gap-2 border-b border-slate-100 px-3 py-2 text-left ${
           tone === 'muted' ? 'bg-slate-50' : 'bg-white'
         }`}
       >
-        <div className={`text-[12px] font-semibold ${tone === 'muted' ? 'text-slate-500' : 'text-slate-900'}`}>{header}</div>
+        <button
+          type="button"
+          onClick={onOpenDay}
+          className={`min-w-0 text-left text-[12px] font-semibold ${
+            tone === 'muted' ? 'text-slate-500' : 'text-slate-900'
+          } ${canOpenDay ? '' : 'cursor-default'}`}
+        >
+          {header}
+        </button>
         <button
           type="button"
           onClick={(e) => {
             e.stopPropagation()
             onAdd()
           }}
+          data-cell-action="add"
           className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200"
           aria-label="일정 추가"
         >
           +
         </button>
-      </button>
+      </div>
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-1">
         <div className="space-y-1">{items.map(renderTask)}</div>
       </div>
@@ -249,12 +265,19 @@ export function WeekView() {
       <MobileTopBar
         title=""
         center={
-          <div className="flex w-full flex-col items-center justify-center gap-0.5 py-1.5 text-center">
+          <button
+            type="button"
+            onClick={() => {
+              setWeekStart(today)
+            }}
+            className="flex w-full flex-col items-center justify-center gap-0.5 py-1.5 text-center"
+            aria-label="이번 주로 이동"
+          >
             <div className="block truncate text-sm font-semibold text-slate-900">{title}</div>
             {examMetaLabel ? (
               <div className="block truncate text-[11px] font-medium text-slate-600">{examMetaLabel}</div>
             ) : null}
-          </div>
+          </button>
         }
         left={
           <Button
@@ -318,6 +341,7 @@ export function WeekView() {
                 onAdd={() => openTaskAdd({ date: '' })}
                 onOpenDay={() => {}}
                 items={tasksByDate.unassigned}
+                canOpenDay={false}
               />,
             ]
             // Keep exactly 8 cells even if something changes unexpectedly.
