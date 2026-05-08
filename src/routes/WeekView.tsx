@@ -200,9 +200,9 @@ export function WeekView() {
     isToday?: boolean
   }) => (
     <div
-      className={`flex min-h-0 flex-col border border-slate-200 bg-white ${
+      className={`relative flex min-h-0 flex-col border border-slate-200 bg-white ${
         dragOverKey === keyId ? 'ring-2 ring-slate-400' : ''
-      } ${tone === 'muted' ? 'bg-slate-50' : ''} ${isToday ? 'ring-2 ring-slate-900 ring-inset' : ''}`}
+      } ${tone === 'muted' ? 'bg-slate-50 saturate-[0.92]' : ''}`}
       onDragOver={(e) => {
         e.preventDefault()
         setDragOverKey(keyId)
@@ -217,10 +217,11 @@ export function WeekView() {
         else updateTask(taskId, { date: keyId })
       }}
     >
+      {isToday ? <div className="pointer-events-none absolute inset-0 z-10 border-2 border-slate-900" /> : null}
       <button
         type="button"
         onClick={onOpenDay}
-        className={`flex items-center justify-between gap-2 border-b border-slate-100 px-3 py-2 text-left ${
+        className={`relative z-0 flex items-center justify-between gap-2 border-b border-slate-100 px-3 py-2 text-left ${
           tone === 'muted' ? 'bg-slate-50' : 'bg-white'
         }`}
       >
@@ -248,10 +249,10 @@ export function WeekView() {
       <MobileTopBar
         title=""
         center={
-          <div className="min-w-0">
+          <div className="flex w-full flex-col items-center justify-center gap-0.5 py-1.5 text-center">
             <div className="block truncate text-sm font-semibold text-slate-900">{title}</div>
             {examMetaLabel ? (
-              <div className="mt-0.5 block truncate text-[11px] font-medium text-slate-600">{examMetaLabel}</div>
+              <div className="block truncate text-[11px] font-medium text-slate-600">{examMetaLabel}</div>
             ) : null}
           </div>
         }
@@ -312,7 +313,7 @@ export function WeekView() {
               <Cell
                 key="__unassigned__"
                 keyId="__unassigned__"
-                header="날짜 미정"
+                header={<span className="text-slate-500">날짜 미정</span>}
                 tone="muted"
                 onAdd={() => openTaskAdd({ date: '' })}
                 onOpenDay={() => {}}
