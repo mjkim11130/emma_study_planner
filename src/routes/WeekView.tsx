@@ -1,8 +1,11 @@
 import { addDays, differenceInCalendarDays, format, isSameDay, isValid, parseISO, startOfWeek } from 'date-fns'
 import { ko } from 'date-fns/locale'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import { ContextMenu, type ContextMenuItem, type ContextMenuState } from '../components/ContextMenu'
+import { useConfirmDialog } from '../components/ConfirmDialog'
 import { MobileTopBar } from '../components/MobileTopBar'
+import { IconCalendarMonth, IconCalendarViewDay, IconChecklist, IconPlus } from '../components/NavIcons'
 import { Button } from '../components/ui'
 import { todayYmd } from '../lib/dates'
 import { useTaskDialog } from '../components/TaskDialogContext'
@@ -67,11 +70,13 @@ export function WeekView() {
   const weekStartParam = searchParams.get('weekStart') ?? ''
 
   const { openTaskAdd, openTaskPreview } = useTaskDialog()
+  const { confirm } = useConfirmDialog()
   const activeExamId = usePlannerStore((s) => s.activeExamId)
   const activeExam = usePlannerStore(useMemo(() => (s) => s.exams.find((e) => e.id === activeExamId), [activeExamId]))
   const subjects = usePlannerStore((s) => s.subjects)
   const tasks = usePlannerStore((s) => s.tasks)
   const updateTask = usePlannerStore((s) => s.updateTask)
+  const deleteTask = usePlannerStore((s) => s.deleteTask)
 
   const weekStartDate = useMemo(() => {
     const parsed = weekStartParam ? parseISO(weekStartParam) : null
@@ -116,6 +121,12 @@ export function WeekView() {
   }, [tasks, ymds, activeExamId])
 
   const [dragOverKey, setDragOverKey] = useState<string | null>(null)
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
+  const openContextMenu = (e: ReactMouseEvent, items: ContextMenuItem[]) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setContextMenu({ x: e.clientX, y: e.clientY, items })
+  }
   const setWeekStart = (d: Date) => {
     const next = format(startOfWeek(d, { weekStartsOn: 1 }), 'yyyy-MM-dd')
     setSearchParams((prev) => {
@@ -152,6 +163,37 @@ export function WeekView() {
     return `${weekLabel} · ${examCountdown.dday}`
   }, [activeExam, examCountdown])
 
+  const openTaskMenu = (e: ReactMouseEvent, t: StudyTask) => {
+    openContextMenu(e, [
+      { key: 'timer', label: '타이머', onSelect: () => openTaskPreview(t.id, { autoTimer: true }) },
+      { key: 'edit', label: '편집', onSelect: () => openTaskPreview(t.id, { autoEdit: true }) },
+      {
+        key: 'delete',
+        label: '삭제',
+        danger: true,
+        onSelect: async () => {
+          const ok = await confirm({
+            title: '일정을 삭제할까요?',
+            message: '이 작업은 되돌릴 수 없어요.',
+            confirmLabel: '삭제',
+            danger: true,
+          })
+          if (!ok) return
+          deleteTask(t.id)
+        },
+      },
+    ])
+  }
+
+  const openDateMenu = (e: ReactMouseEvent, ymd: string) => {
+    openContextMenu(e, [
+      { key: 'add', label: '일정 추가', icon: <IconPlus className="h-4 w-4" />, onSelect: () => openTaskAdd({ date: ymd }) },
+      { key: 'month', label: '월간 캘린더 보기', icon: <IconCalendarMonth className="h-4 w-4" />, onSelect: () => navigate(`/?month=${encodeURIComponent(ymd.slice(0, 7))}`) },
+      { key: 'timeline', label: '타임라인 보기', icon: <IconCalendarViewDay className="h-4 w-4" />, onSelect: () => navigate(`/day/${ymd}`) },
+      { key: 'planned', label: '일일 계획 보기', icon: <IconChecklist className="h-4 w-4" />, onSelect: () => navigate(`/day/${ymd}?view=planned`) },
+    ])
+  }
+
   const renderTask = (t: StudyTask) => {
     const sub = subjectById.get(t.subjectId)
     const bg = sub?.color ?? '#e2e8f0'
@@ -167,18 +209,17 @@ export function WeekView() {
           e.dataTransfer.setData('text/emma-task-id', t.id)
           e.dataTransfer.effectAllowed = 'move'
         }}
+        onContextMenu={(e) => openTaskMenu(e, t)}
         data-task-card="true"
-        className="flex w-full select-none items-center justify-between gap-2 rounded-[8px] border border-black/10 px-1.5 py-1.5 text-left text-[11px] font-semibold shadow-sm"
+        className="flex w-full select-none items-center gap-1 rounded-[4px] border border-black/10 px-1.5 py-1 text-left text-[11px] font-semibold leading-tight shadow-sm"
         style={{ backgroundColor: bg, color: onText }}
       >
-        <span className="min-w-0 flex-1 truncate">{t.title || '제목 없음'}</span>
+        <span className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-clip">{t.title || '제목 없음'}</span>
         {completed ? (
-          <span className="ml-2 shrink-0 tabular-nums opacity-95" aria-label="완료" title="완료">
+          <span className="shrink-0 tabular-nums opacity-95" aria-label="완료" title="완료">
             ✓
           </span>
-        ) : (
-          <span className="ml-2 w-3 shrink-0" aria-hidden="true" />
-        )}
+        ) : null}
       </button>
     )
   }
@@ -192,6 +233,7 @@ export function WeekView() {
     items,
     isToday,
     canOpenDay = true,
+    onContextMenu,
   }: {
     keyId: string
     header: React.ReactNode
@@ -201,6 +243,7 @@ export function WeekView() {
     items: StudyTask[]
     isToday?: boolean
     canOpenDay?: boolean
+    onContextMenu?: (e: ReactMouseEvent) => void
   }) => (
     <div
       className={`relative flex min-h-0 flex-col border border-slate-200 bg-white ${
@@ -225,6 +268,7 @@ export function WeekView() {
         if (keyId === '__unassigned__') updateTask(taskId, { date: '' })
         else updateTask(taskId, { date: keyId })
       }}
+      onContextMenu={onContextMenu}
     >
       {isToday ? <div className="pointer-events-none absolute inset-0 z-10 border-2 border-slate-300" /> : null}
       <div
@@ -254,8 +298,8 @@ export function WeekView() {
           +
         </button>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-1">
-        <div className="space-y-1">{items.map(renderTask)}</div>
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-0 py-0.5">
+        <div className="space-y-0.5">{items.map(renderTask)}</div>
       </div>
     </div>
   )
@@ -330,6 +374,7 @@ export function WeekView() {
                     onOpenDay={() => navigate(`/day/${ymd}`)}
                     items={bucket}
                     isToday={isToday}
+                    onContextMenu={(e) => openDateMenu(e, ymd)}
                   />
                 )
               }),
@@ -355,6 +400,7 @@ export function WeekView() {
           })()}
         </div>
       </div>
+      <ContextMenu menu={contextMenu} onClose={() => setContextMenu(null)} />
     </div>
   )
 }

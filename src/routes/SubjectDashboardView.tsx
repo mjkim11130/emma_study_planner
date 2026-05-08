@@ -1,13 +1,16 @@
 import { addDays, addMonths, endOfMonth, endOfWeek, format, isWithinInterval, parseISO, startOfMonth, startOfWeek } from 'date-fns'
 import { ko } from 'date-fns/locale'
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import { ContextMenu, type ContextMenuItem, type ContextMenuState } from '../components/ContextMenu'
+import { useConfirmDialog } from '../components/ConfirmDialog'
 import { MobileTopBar } from '../components/MobileTopBar'
 import { useTaskDialog } from '../components/TaskDialogContext'
 import { SubjectDialog } from '../components/SubjectDialog'
 import { TaskDialogShell } from '../components/TaskDialogShell'
 import { Button } from '../components/ui'
 import { todayYmd } from '../lib/dates'
-import { formatDurationKoFromMinutes, formatDurationKoFromSeconds } from '../lib/time'
+import { formatDurationKoFromMinutes, formatDurationKoFromSeconds, durationSecondsFromHmRange } from '../lib/time'
+import { formatDday } from '../lib/dday'
 import { usePlannerStore } from '../store/usePlannerStore'
 import type { StudyTask, Subject } from '../store/types'
 
@@ -243,14 +246,6 @@ function hmToMinutes(hm?: string | null) {
   return h * 60 + mm
 }
 
-function secondsBetweenHm(start?: string | null, end?: string | null) {
-  const s = hmToMinutes(start ?? null)
-  const e = hmToMinutes(end ?? null)
-  if (s == null || e == null) return null
-  if (e <= s) return null
-  return (e - s) * 60
-}
-
 function formatMeridiemHm(hm?: string | null) {
   if (!hm) return null
   const m = /^(\d{1,2}):(\d{2})$/.exec(hm)
@@ -261,17 +256,6 @@ function formatMeridiemHm(hm?: string | null) {
   const meridiem = h24 < 12 ? '오전' : '오후'
   const h12 = h24 % 12 === 0 ? 12 : h24 % 12
   return `${meridiem} ${String(h12).padStart(2, '0')}:${String(mm).padStart(2, '0')}`
-}
-
-function formatDdayLabel(dueDate?: string) {
-  if (!dueDate) return ''
-  const today = parseISO(todayYmd())
-  const due = parseISO(dueDate)
-  if (Number.isNaN(due.getTime())) return ''
-  const diff = Math.round((due.getTime() - today.getTime()) / (24 * 60 * 60 * 1000))
-  if (diff === 0) return 'D-day'
-  if (diff > 0) return `D-${diff}`
-  return `D+${Math.abs(diff)}`
 }
 
 function formatDueDateKo(dueDate?: string) {
@@ -356,9 +340,20 @@ function withinPeriodDate(ymd: string, period: Period, baseDate = parseISO(today
   return isWithinInterval(parseISO(ymd), { start: range.start, end: addDays(range.end, 1) })
 }
 
-function TaskRow({ t, subjectColor, onOpen }: { t: StudyTask; subjectColor: string; onOpen: () => void }) {
+function TaskRow({
+  t,
+  subjectColor,
+  onOpen,
+  onContextMenu,
+}: {
+  t: StudyTask
+  subjectColor: string
+  onOpen: () => void
+  onContextMenu?: (e: ReactMouseEvent) => void
+}) {
   const updateTask = usePlannerStore((s) => s.updateTask)
-  const dday = formatDdayLabel(t.dueDate)
+  const ignoreNextClickRef = useRef(false)
+  const dday = formatDday(t.dueDate)
   const dueText = formatDueDateKo(t.dueDate)
   const dateLine = formatTaskDateLine(t.date)
   const hasAnyRecord = Boolean(t.actualStartTime || t.actualEndTime || typeof t.actualSeconds === 'number')
@@ -367,11 +362,7 @@ function TaskRow({ t, subjectColor, onOpen }: { t: StudyTask; subjectColor: stri
   const plannedSeconds = Number.isFinite(t.plannedSeconds) ? Math.max(0, t.plannedSeconds) : 0
   const hasPlannedDuration = plannedSeconds > 0
   const actualSecondsFromTimes = (() => {
-    const s = hmToMinutes(t.actualStartTime ?? null)
-    const e = hmToMinutes(t.actualEndTime ?? null)
-    if (s === null || e === null) return 0
-    if (e < s) return 0
-    return (e - s) * 60
+    return durationSecondsFromHmRange(t.actualStartTime, t.actualEndTime, { allowNextDay: true }) ?? 0
   })()
   const actualSeconds =
     typeof t.actualSeconds === 'number' && Number.isFinite(t.actualSeconds)
@@ -393,7 +384,7 @@ function TaskRow({ t, subjectColor, onOpen }: { t: StudyTask; subjectColor: stri
 
   const actualStartMin = hmToMinutes(t.actualStartTime ?? null)
   const actualEndMin = hmToMinutes(t.actualEndTime ?? null)
-  const actualIsTinyRange = actualStartMin !== null && actualEndMin !== null ? Math.max(0, actualEndMin - actualStartMin) < 1 : false
+  const actualIsTinyRange = actualStartMin !== null && actualEndMin !== null ? actualSeconds < 60 : false
   const plannedIsTinyRange = hasPlannedDuration ? plannedSeconds / 60 < 1 : false
   const timeLabel =
     t.actualStartTime || t.actualEndTime
@@ -409,10 +400,27 @@ function TaskRow({ t, subjectColor, onOpen }: { t: StudyTask; subjectColor: stri
         : ''
 
   return (
-    <button
-      type="button"
-      onClick={onOpen}
-      className={`grid w-full select-none grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 px-2 py-3 text-slate-900 hover:bg-slate-50 ${
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={() => {
+        if (ignoreNextClickRef.current) {
+          ignoreNextClickRef.current = false
+          return
+        }
+        onOpen()
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onOpen()
+        }
+      }}
+      onContextMenu={(e) => {
+        ignoreNextClickRef.current = true
+        onContextMenu?.(e)
+      }}
+      className={`grid w-full cursor-pointer select-none grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 px-2 py-3 text-slate-900 hover:bg-slate-50 ${
         isCompleted ? 'opacity-75' : ''
       }`}
     >
@@ -533,7 +541,7 @@ function TaskRow({ t, subjectColor, onOpen }: { t: StudyTask; subjectColor: stri
           )}
         </span>
       </span>
-    </button>
+    </div>
   )
 }
 
@@ -608,6 +616,7 @@ function SubjectCard({
   baseDate,
   onEditSubject,
   onOpenTask,
+  onOpenTaskContextMenu,
   onAddTask,
   limit,
   forceExpanded,
@@ -618,6 +627,7 @@ function SubjectCard({
   baseDate: Date
   onEditSubject: () => void
   onOpenTask: (taskId: string) => void
+  onOpenTaskContextMenu?: (e: ReactMouseEvent, taskId: string) => void
   onAddTask: () => void
   limit: number | null
   forceExpanded?: boolean
@@ -628,7 +638,7 @@ function SubjectCard({
     return acc + Math.max(0, v)
   }, 0)
   const completedSecondsCompletedOnly = buckets.completed.reduce((acc, t) => {
-    const byRange = secondsBetweenHm(t.actualStartTime ?? null, t.actualEndTime ?? null)
+    const byRange = durationSecondsFromHmRange(t.actualStartTime, t.actualEndTime, { allowNextDay: true })
     const bySec = typeof t.actualSeconds === 'number' && Number.isFinite(t.actualSeconds) ? t.actualSeconds : null
     const v = byRange ?? bySec ?? 0
     return acc + (Number.isFinite(v) ? Math.max(0, v) : 0)
@@ -715,7 +725,13 @@ function SubjectCard({
         {isCollapsed ? null : (
           <div className="divide-y divide-slate-200">
             {shown.map((t) => (
-              <TaskRow key={t.id} t={t} subjectColor={subject.color} onOpen={() => onOpenTask(t.id)} />
+              <TaskRow
+                key={t.id}
+                t={t}
+                subjectColor={subject.color}
+                onOpen={() => onOpenTask(t.id)}
+                onContextMenu={(e) => onOpenTaskContextMenu?.(e, t.id)}
+              />
             ))}
           </div>
         )}
@@ -825,10 +841,12 @@ export function SubjectDashboardView() {
   const subjects = usePlannerStore((s) => s.subjects)
   const activeExamId = usePlannerStore((s) => s.activeExamId)
   const tasks = usePlannerStore((s) => s.tasks)
+  const deleteTask = usePlannerStore((s) => s.deleteTask)
   const lastUsedSubjectIdByExam = usePlannerStore((s) => s.lastUsedSubjectIdByExam)
   const subjectOrderByExam = usePlannerStore((s) => s.subjectOrderByExam)
   const setSubjectOrder = usePlannerStore((s) => s.setSubjectOrder)
   const { openTaskAdd, openTaskPreview } = useTaskDialog()
+  const { confirm } = useConfirmDialog()
 
   const scopedSubjects = useMemo(() => subjects.filter((s) => s.examId === activeExamId), [subjects, activeExamId])
   const subjectOrder = useMemo(() => subjectOrderByExam[activeExamId] ?? [], [subjectOrderByExam, activeExamId])
@@ -862,6 +880,33 @@ export function SubjectDashboardView() {
   const [period, setPeriod] = useState<Period>('week')
   const [cursorYmd, setCursorYmd] = useState(() => todayYmd())
   const [query, setQuery] = useState('')
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
+  const openContextMenu = (e: ReactMouseEvent, items: ContextMenuItem[]) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setContextMenu({ x: e.clientX, y: e.clientY, items })
+  }
+  const openTaskMenu = (e: ReactMouseEvent, taskId: string) => {
+    openContextMenu(e, [
+      { key: 'timer', label: '타이머', onSelect: () => openTaskPreview(taskId, { autoTimer: true }) },
+      { key: 'edit', label: '편집', onSelect: () => openTaskPreview(taskId, { autoEdit: true }) },
+      {
+        key: 'delete',
+        label: '삭제',
+        danger: true,
+        onSelect: async () => {
+          const ok = await confirm({
+            title: '일정을 삭제할까요?',
+            message: '이 작업은 되돌릴 수 없어요.',
+            confirmLabel: '삭제',
+            danger: true,
+          })
+          if (!ok) return
+          deleteTask(taskId)
+        },
+      },
+    ])
+  }
 
   const cursorDate = useMemo(() => parseISO(cursorYmd), [cursorYmd])
 
@@ -973,7 +1018,7 @@ export function SubjectDashboardView() {
         return acc + Math.max(0, v)
       }, 0)
       const completedSec = buckets.completed.reduce((acc, t) => {
-        const byRange = secondsBetweenHm(t.actualStartTime ?? null, t.actualEndTime ?? null)
+        const byRange = durationSecondsFromHmRange(t.actualStartTime, t.actualEndTime, { allowNextDay: true })
         const bySec = typeof t.actualSeconds === 'number' && Number.isFinite(t.actualSeconds) ? t.actualSeconds : null
         const v = byRange ?? bySec ?? 0
         return acc + (Number.isFinite(v) ? Math.max(0, v) : 0)
@@ -1422,12 +1467,13 @@ export function SubjectDashboardView() {
                       setSubjectDialogMode('edit')
                       setSubjectDialogSubjectId(s.id)
                       setSubjectDialogOpen(true)
-                    }}
-                  onOpenTask={(id) => openTaskPreview(id)}
-                  onAddTask={() => createTask({ subjectId: s.id })}
-                  limit={3}
-                  forceExpanded={Boolean(queryNorm && matchedTaskIdsBySubject.has(s.id))}
-                />
+	                    }}
+	                    onOpenTask={(id) => openTaskPreview(id)}
+	                    onOpenTaskContextMenu={openTaskMenu}
+	                    onAddTask={() => createTask({ subjectId: s.id })}
+	                    limit={3}
+	                    forceExpanded={Boolean(queryNorm && matchedTaskIdsBySubject.has(s.id))}
+	                  />
               ),
             }))}
           />
@@ -1538,6 +1584,7 @@ export function SubjectDashboardView() {
             })}
           </div>
         </div>
+        <ContextMenu menu={contextMenu} onClose={() => setContextMenu(null)} />
       </TaskDialogShell>
     </div>
   )

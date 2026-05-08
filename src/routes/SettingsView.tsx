@@ -134,6 +134,8 @@ export function SettingsView() {
               variant="secondary"
               onClick={async () => {
                 if (!supabaseConfigOk || !user) return
+                const ok = window.confirm('이 계정의 모든 시즌, 주제, 일정을 초기화할까요? 이 작업은 되돌릴 수 없어요.')
+                if (!ok) return
                 // 1) Reset local immediately
                 try {
                   window.localStorage.removeItem('emma-study-planner:v1')
@@ -148,6 +150,8 @@ export function SettingsView() {
                   activeExamId: state.activeExamId,
                   subjects: state.subjects,
                   tasks: state.tasks,
+                  lastUsedSubjectIdByExam: state.lastUsedSubjectIdByExam,
+                  subjectOrderByExam: state.subjectOrderByExam,
                 }
                 await getSupabase().from('planner_state').upsert({ user_id: user.id, data })
                 navigate('/', { replace: true })
@@ -368,7 +372,9 @@ export function SettingsView() {
               <div className="mt-3">
                 <Button
                   variant="danger"
+                  disabled={exams.length <= 1}
                   onClick={() => {
+                    if (exams.length <= 1) return
                     const ok = window.confirm('이 시즌을 삭제할까요? 해당 시즌의 주제/일정도 함께 삭제됩니다.')
                     if (!ok) return
                     deleteExam(examEditorId)

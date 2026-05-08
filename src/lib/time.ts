@@ -1,7 +1,51 @@
-export function hmToMinutes(hm: string) {
-  const [h, m] = hm.split(':').map((x) => Number(x))
+type DiffHmOptions = {
+  allowNextDay?: boolean
+  equalAsZero?: boolean
+}
+
+export function hmToMinutes(hm?: string | null) {
+  if (!hm) return null
+  const match = /^(\d{1,2}):(\d{2})$/.exec(hm.trim())
+  if (!match) return null
+  const h = Number(match[1])
+  const m = Number(match[2])
   if (!Number.isFinite(h) || !Number.isFinite(m)) return null
+  if (h < 0 || h > 23 || m < 0 || m > 59) return null
   return h * 60 + m
+}
+
+export function minutesToHm(totalMinutes: number) {
+  const normalized = ((Math.floor(totalMinutes) % (24 * 60)) + 24 * 60) % (24 * 60)
+  const h = Math.floor(normalized / 60)
+  const m = normalized % 60
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+}
+
+export function diffMinutesBetweenHm(startHm?: string | null, endHm?: string | null, opts: DiffHmOptions = {}) {
+  const start = hmToMinutes(startHm)
+  const end = hmToMinutes(endHm)
+  if (start === null || end === null) return null
+
+  if (end === start) {
+    return { minutes: opts.equalAsZero === false ? null : 0, wraps: false }
+  }
+
+  if (end > start) return { minutes: end - start, wraps: false }
+  if (!opts.allowNextDay) return null
+  return { minutes: end + 24 * 60 - start, wraps: true }
+}
+
+export function durationSecondsFromHmRange(startHm?: string | null, endHm?: string | null, opts: DiffHmOptions = {}) {
+  const diff = diffMinutesBetweenHm(startHm, endHm, opts)
+  if (!diff || diff.minutes === null) return undefined
+  return diff.minutes * 60
+}
+
+export function addSecondsToHm(hm: string, secondsToAdd: number) {
+  const startMinutes = hmToMinutes(hm)
+  if (startMinutes === null) return null
+  const seconds = Number.isFinite(secondsToAdd) ? secondsToAdd : 0
+  return minutesToHm(startMinutes + seconds / 60)
 }
 
 export function formatMinutes(totalMinutes: number) {

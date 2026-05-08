@@ -11,6 +11,17 @@ function parseHm(value: string | null | undefined) {
   return { hour: h, minute: mm }
 }
 
+function buildMinuteValues(stepMinutes: number) {
+  const values: number[] = []
+  for (let minute = 0; minute < 60; minute += stepMinutes) values.push(minute)
+  return values
+}
+
+function snapMinuteToStep(minute: number, stepMinutes: number) {
+  const values = buildMinuteValues(stepMinutes)
+  return values.reduce((closest, current) => (Math.abs(current - minute) < Math.abs(closest - minute) ? current : closest), values[0] ?? 0)
+}
+
 function nowHmRoundedTo(stepMinutes: number) {
   const step = Math.max(1, Math.min(60, Math.trunc(stepMinutes)))
   const now = new Date()
@@ -50,7 +61,8 @@ export function TimePickerModal({
   validate,
 }: TimePickerModalProps) {
   const step = useMemo(() => clampInt(stepMinutes, 1, 60), [stepMinutes])
-  const minuteCount = 60
+  const minuteValues = useMemo(() => buildMinuteValues(step), [step])
+  const minuteCount = minuteValues.length
 
   const dialogRef = useRef<HTMLDivElement | null>(null)
   const hourListRef = useRef<HTMLDivElement | null>(null)
@@ -64,14 +76,15 @@ export function TimePickerModal({
     const fallbackHm = nowHmRoundedTo(step)
     const parsed = parseHm(initialHm) ?? parseHm(fallbackHm)
     const h = parsed ? clampInt(parsed.hour, 0, 23) : 0
-    const snappedMinute = clampInt(parsed?.minute ?? 0, 0, 59)
+    const snappedMinute = snapMinuteToStep(clampInt(parsed?.minute ?? 0, 0, 59), step)
     setDraftHour(h)
     setDraftMinute(snappedMinute)
     window.setTimeout(() => {
       dialogRef.current?.focus()
       const itemH = 44
       hourListRef.current?.scrollTo({ top: h * itemH, behavior: 'instant' as ScrollBehavior })
-      minuteListRef.current?.scrollTo({ top: snappedMinute * itemH, behavior: 'instant' as ScrollBehavior })
+      const minuteIndex = Math.max(0, minuteValues.indexOf(snappedMinute))
+      minuteListRef.current?.scrollTo({ top: minuteIndex * itemH, behavior: 'instant' as ScrollBehavior })
     }, 0)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
@@ -85,7 +98,7 @@ export function TimePickerModal({
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [open, onClose])
 
-  const hm = `${String(clampInt(draftHour, 0, 23)).padStart(2, '0')}:${String(clampInt(draftMinute, 0, 59)).padStart(2, '0')}`
+  const hm = `${String(clampInt(draftHour, 0, 23)).padStart(2, '0')}:${String(snapMinuteToStep(clampInt(draftMinute, 0, 59), step)).padStart(2, '0')}`
   const validationMessage = validate?.(hm) ?? null
   const invalid = Boolean(validationMessage)
 
@@ -178,18 +191,19 @@ export function TimePickerModal({
                   const el = e.currentTarget
                   const itemH = 44
                   const idx = clampInt(Math.round(el.scrollTop / itemH), 0, minuteCount - 1)
-                  if (idx !== draftMinute) setDraftMinute(idx)
+                  const nextMinute = minuteValues[idx] ?? 0
+                  if (nextMinute !== draftMinute) setDraftMinute(nextMinute)
                 }}
                 onWheel={(e) => e.stopPropagation()}
               >
-                {Array.from({ length: minuteCount }, (_, m) => m).map((m) => (
+                {minuteValues.map((m, idx) => (
                     <button
                       key={m}
                       type="button"
                       onClick={() => {
                         setDraftMinute(m)
                         const itemH = 44
-                        minuteListRef.current?.scrollTo({ top: m * itemH, behavior: 'smooth' })
+                        minuteListRef.current?.scrollTo({ top: idx * itemH, behavior: 'smooth' })
                       }}
                       className="flex h-11 w-full snap-center items-center justify-center text-base font-medium text-slate-900"
                       aria-label={`${String(m).padStart(2, '0')}분 선택`}

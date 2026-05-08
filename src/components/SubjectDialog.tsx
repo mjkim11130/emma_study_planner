@@ -50,6 +50,7 @@ export function SubjectDialog({
 }) {
   const activeExamId = usePlannerStore((s) => s.activeExamId)
   const subjects = usePlannerStore((s) => s.subjects)
+  const tasks = usePlannerStore((s) => s.tasks)
   const addSubject = usePlannerStore((s) => s.addSubject)
   const updateSubject = usePlannerStore((s) => s.updateSubject)
   const deleteSubject = usePlannerStore((s) => s.deleteSubject)
@@ -58,6 +59,7 @@ export function SubjectDialog({
     if (mode !== 'edit' || !subjectId) return null
     return subjects.find((s) => s.id === subjectId) ?? null
   }, [mode, subjectId, subjects])
+  const subjectTaskCount = useMemo(() => (subject ? tasks.filter((task) => task.subjectId === subject.id).length : 0), [subject, tasks])
 
   const [name, setName] = useState('')
   const [nameSample, setNameSample] = useState('주제 추가')
@@ -157,6 +159,12 @@ export function SubjectDialog({
               type="button"
               onClick={() => {
                 if (!subject) return
+                const ok = window.confirm(
+                  subjectTaskCount > 0
+                    ? `이 주제를 삭제할까요? 연결된 일정 ${subjectTaskCount}개도 함께 삭제됩니다.`
+                    : '이 주제를 삭제할까요?',
+                )
+                if (!ok) return
                 deleteSubject(subject.id)
                 onClose()
               }}

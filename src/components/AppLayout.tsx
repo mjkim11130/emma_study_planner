@@ -3,45 +3,15 @@ import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { usePlannerStore } from '../store/usePlannerStore'
 import { formatDurationKoFromSeconds } from '../lib/time'
 import { todayYmd } from '../lib/dates'
+import { formatDday } from '../lib/dday'
 import { Button } from './ui'
+import { ConfirmDialogProvider } from './ConfirmDialog'
 import { TaskDialogContext } from './TaskDialogContext'
 import { TaskDialog } from './TaskDialog'
 import { SubjectDialog } from './SubjectDialog'
+import { IconCalendarMonth, IconCalendarViewDay, IconCalendarWeek } from './NavIcons'
 
 export const SidebarToggleContext = createContext<{ open: boolean; toggle: () => void } | null>(null)
-
-function IconCalendarMonth() {
-  return (
-    <svg viewBox="0 -960 960 960" className="h-5 w-5" aria-hidden="true">
-      <path
-        d="M480-400q-17 0-28.5-11.5T440-440q0-17 11.5-28.5T480-480q17 0 28.5 11.5T520-440q0 17-11.5 28.5T480-400Zm-188.5-11.5Q280-423 280-440t11.5-28.5Q303-480 320-480t28.5 11.5Q360-457 360-440t-11.5 28.5Q337-400 320-400t-28.5-11.5ZM640-400q-17 0-28.5-11.5T600-440q0-17 11.5-28.5T640-480q17 0 28.5 11.5T680-440q0 17-11.5 28.5T640-400ZM480-240q-17 0-28.5-11.5T440-280q0-17 11.5-28.5T480-320q17 0 28.5 11.5T520-280q0 17-11.5 28.5T480-240Zm-188.5-11.5Q280-263 280-280t11.5-28.5Q303-320 320-320t28.5 11.5Q360-297 360-280t-11.5 28.5Q337-240 320-240t-28.5-11.5ZM640-240q-17 0-28.5-11.5T600-280q0-17 11.5-28.5T640-320q17 0 28.5 11.5T680-280q0 17-11.5 28.5T640-240ZM200-80q-33 0-56.5-23.5T120-160v-560q0-33 23.5-56.5T200-800h40v-80h80v80h320v-80h80v80h40q33 0 56.5 23.5T840-720v560q0 33-23.5 56.5T760-80H200Zm0-80h560v-400H200v400Z"
-        fill="currentColor"
-      />
-    </svg>
-  )
-}
-
-function IconCalendarViewDay() {
-  return (
-    <svg viewBox="0 -960 960 960" className="h-5 w-5" aria-hidden="true">
-      <path
-        d="M200-280q-33 0-56.5-23.5T120-360v-240q0-33 23.5-56.5T200-680h560q33 0 56.5 23.5T840-600v240q0 33-23.5 56.5T760-280H200Zm-80-480v-80h720v80H120Zm0 640v-80h720v80H120Z"
-        fill="currentColor"
-      />
-    </svg>
-  )
-}
-
-function IconCalendarWeek() {
-  return (
-    <svg viewBox="0 -960 960 960" className="h-5 w-5" aria-hidden="true">
-      <path
-        d="M160-160q-33 0-56.5-23.5T80-240v-480q0-33 23.5-56.5T160-800h640q33 0 56.5 23.5T880-720v480q0 33-23.5 56.5T800-160H160Zm0-360h160v-200H160v200Zm240 0h160v-200H400v200Zm240 0h160v-200H640v200ZM320-240v-200H160v200h160Zm80 0h160v-200H400v200Zm240 0h160v-200H640v200Z"
-        fill="currentColor"
-      />
-    </svg>
-  )
-}
 
 function IconFolder() {
   return (
@@ -84,17 +54,6 @@ const pickReadableTextColor = (bg: string) => {
   })
   const L = 0.2126 * srgb[0] + 0.7152 * srgb[1] + 0.0722 * srgb[2]
   return L < 0.45 ? '#ffffff' : '#0f172a'
-}
-
-function formatDday(dueDate?: string) {
-  if (!dueDate) return ''
-  const today = new Date()
-  const d = new Date(`${dueDate}T00:00:00`)
-  if (Number.isNaN(d.getTime())) return ''
-  const diff = Math.round((d.getTime() - today.setHours(0, 0, 0, 0)) / (24 * 60 * 60 * 1000))
-  if (diff === 0) return 'D-DAY'
-  if (diff > 0) return `D-${diff}`
-  return `D+${Math.abs(diff)}`
 }
 
 function truncateText(s: string, max: number) {
@@ -223,6 +182,14 @@ export function AppLayout() {
     setTaskDialogRequest({ mode: 'preview', taskId })
   }
 
+  useEffect(() => {
+    const preventContextMenu = (e: MouseEvent) => {
+      e.preventDefault()
+    }
+    window.addEventListener('contextmenu', preventContextMenu)
+    return () => window.removeEventListener('contextmenu', preventContextMenu)
+  }, [])
+
   const unassignedPending = useMemo(
     () => tasks.filter((t) => t.examId === activeExamId && t.status !== 'completed' && (!t.date || t.date === '')),
     [tasks, activeExamId],
@@ -279,14 +246,15 @@ export function AppLayout() {
   }, [tasks, activeExamId, dayPageDate])
 
   return (
-    <TaskDialogContext.Provider
-      value={{
-        openTaskAdd: (input) => setTaskDialogRequest({ mode: 'add', ...input }),
-        openTaskPreview: (taskId, opts) => setTaskDialogRequest({ mode: 'preview', taskId, ...opts }),
-        request: taskDialogRequest,
-        clearRequest: () => setTaskDialogRequest(null),
-      }}
-    >
+    <ConfirmDialogProvider>
+      <TaskDialogContext.Provider
+        value={{
+          openTaskAdd: (input) => setTaskDialogRequest({ mode: 'add', ...input }),
+          openTaskPreview: (taskId, opts) => setTaskDialogRequest({ mode: 'preview', taskId, ...opts }),
+          request: taskDialogRequest,
+          clearRequest: () => setTaskDialogRequest(null),
+        }}
+      >
       <SidebarToggleContext.Provider value={{ open: sidebarOpen, toggle: () => setSidebarOpen((cur) => !cur) }}>
         <div className="h-full [--bottom-nav-h:72px]">
           <div
@@ -727,23 +695,24 @@ export function AppLayout() {
         </div>
       </SidebarToggleContext.Provider>
 
-      <SubjectDialog
-        open={subjectDialogOpen}
-        mode="add"
-        onClose={() => {
-          setSubjectDialogOpen(false)
-          setPendingTaskCreate(null)
-          setSubjectDialogForTaskCreate(false)
-        }}
-        onAfterAdd={(subjectId) => {
-          const pending = pendingTaskCreate
-          setSubjectDialogOpen(false)
-          setPendingTaskCreate(null)
-          if (subjectDialogForTaskCreate) setTaskDialogRequest({ mode: 'add', subjectId, date: pending?.date })
-          setSubjectDialogForTaskCreate(false)
-        }}
-      />
-    </TaskDialogContext.Provider>
+        <SubjectDialog
+          open={subjectDialogOpen}
+          mode="add"
+          onClose={() => {
+            setSubjectDialogOpen(false)
+            setPendingTaskCreate(null)
+            setSubjectDialogForTaskCreate(false)
+          }}
+          onAfterAdd={(subjectId) => {
+            const pending = pendingTaskCreate
+            setSubjectDialogOpen(false)
+            setPendingTaskCreate(null)
+            if (subjectDialogForTaskCreate) setTaskDialogRequest({ mode: 'add', subjectId, date: pending?.date })
+            setSubjectDialogForTaskCreate(false)
+          }}
+        />
+      </TaskDialogContext.Provider>
+    </ConfirmDialogProvider>
   )
 }
 

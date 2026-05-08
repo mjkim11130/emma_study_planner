@@ -68,8 +68,6 @@ export function TaskTimerModal({ plannedSeconds, subjectName, taskTitle, subject
   const [result, setResult] = useState<null | { actualStartTime: string; actualEndTime: string; actualSeconds: number }>(null)
   const startWallClockRef = useRef<Date | null>(null)
   const tickTimerRef = useRef<number | null>(null)
-  const recordTimerRef = useRef<number | null>(null)
-  const lastRecordedMinuteRef = useRef<number | null>(null)
   const onRecordRef = useRef(onRecord)
 
   useEffect(() => {
@@ -113,19 +111,20 @@ export function TaskTimerModal({ plannedSeconds, subjectName, taskTitle, subject
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return
-      if (running) stopAndRecord()
+      if (running) {
+        setRunning(false)
+        startWallClockRef.current = null
+      }
       onClose()
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [elapsedMs, onClose, running])
+  }, [onClose, running])
 
   useEffect(() => {
     if (!running) {
       if (tickTimerRef.current) window.clearInterval(tickTimerRef.current)
-      if (recordTimerRef.current) window.clearInterval(recordTimerRef.current)
       tickTimerRef.current = null
-      recordTimerRef.current = null
       return
     }
 
@@ -138,28 +137,9 @@ export function TaskTimerModal({ plannedSeconds, subjectName, taskTitle, subject
     tickTimerRef.current = window.setInterval(tick, 250)
     tick()
 
-    const recordNow = () => {
-      const start = startWallClockRef.current ?? new Date()
-      const end = new Date()
-      const seconds = Math.max(0, Math.floor((end.getTime() - start.getTime()) / 1000))
-      onRecordRef.current({ actualStartTime: formatHm(start), actualEndTime: formatHm(end), actualSeconds: seconds })
-      const minuteKey = end.getFullYear() * 100000000 + (end.getMonth() + 1) * 1000000 + end.getDate() * 10000 + end.getHours() * 100 + end.getMinutes()
-      lastRecordedMinuteRef.current = minuteKey
-    }
-
-    // Start immediately records start/end as "now", then keeps updating end time each minute.
-    recordNow()
-    recordTimerRef.current = window.setInterval(() => {
-      const end = new Date()
-      const minuteKey = end.getFullYear() * 100000000 + (end.getMonth() + 1) * 1000000 + end.getDate() * 10000 + end.getHours() * 100 + end.getMinutes()
-      if (lastRecordedMinuteRef.current !== minuteKey) recordNow()
-    }, 1000)
-
     return () => {
       if (tickTimerRef.current) window.clearInterval(tickTimerRef.current)
-      if (recordTimerRef.current) window.clearInterval(recordTimerRef.current)
       tickTimerRef.current = null
-      recordTimerRef.current = null
     }
   }, [running])
 
@@ -168,11 +148,10 @@ export function TaskTimerModal({ plannedSeconds, subjectName, taskTitle, subject
     const endAt = new Date()
     const seconds = Math.max(0, Math.floor((endAt.getTime() - startAt.getTime()) / 1000))
     const nextResult = { actualStartTime: formatHm(startAt), actualEndTime: formatHm(endAt), actualSeconds: seconds }
-    onRecordRef.current(nextResult)
+    if (seconds > 0) onRecordRef.current(nextResult)
     setResult(nextResult)
     setRunning(false)
     startWallClockRef.current = null
-    lastRecordedMinuteRef.current = null
   }
 
   if (typeof document === 'undefined') return null
@@ -195,7 +174,10 @@ export function TaskTimerModal({ plannedSeconds, subjectName, taskTitle, subject
         <button
           type="button"
           onClick={() => {
-            if (running) stopAndRecord()
+            if (running) {
+              setRunning(false)
+              startWallClockRef.current = null
+            }
             onClose()
           }}
           className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-white/10 text-2xl leading-none transition hover:bg-white/20"

@@ -1,124 +1,74 @@
-# React + TypeScript + Vite
+# Emma Study Planner
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+시험 시즌 단위로 주제와 일정을 관리하는 React + TypeScript + Vite 앱입니다.
 
-Currently, two official plugins are available:
+## 핵심 기능
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- `시즌` 단위 분리: 시즌마다 주제, 일정, 통계를 별도로 관리
+- `월간 / 주간 / 일간` 보기: 날짜 배치, 드래그 이동, 타임라인 편집
+- `계획 / 완료` 기록: 계획 시간과 실제 시간을 비교
+- `타이머` 기록: 일정 단위로 실제 공부 시간 측정
+- `주제 대시보드`: 주제별 남은 일정, 완료 수, 소요시간 분석
+- `Supabase Auth + 상태 동기화`: 계정별 로그인과 원격 스냅샷 저장
+- `Excel 내보내기`: 시즌 일정 전체를 `.xlsx`로 추출
 
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
-
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
-
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
-
-## GitHub 연동 + GitHub Pages 배포(React + Vite)
-
-이 레포는 `main` 브랜치에 푸시하면, 같은 푸시로 GitHub Pages까지 자동 배포되도록 설정되어 있습니다(`.github/workflows/deploy-pages.yml`).
-
-### 1) GitHub 레포 만들고 원격 연결
+## 실행
 
 ```bash
-git init
-git add -A
-git commit -m "init"
-git branch -M main
-git remote add origin <YOUR_GITHUB_REPO_URL>
-git push -u origin main
+npm install
+npm run dev
 ```
 
-### 2) GitHub Pages 설정
+## 빌드
 
-- GitHub 레포 → Settings → Pages
-- **Build and deployment** → Source를 **GitHub Actions**로 선택
+```bash
+npm run build
+```
 
-이후 `main`에 푸시할 때마다 `npm ci` → `npm run build` → Pages 배포가 자동으로 진행됩니다.
+## 환경 변수
 
-### 3) 배포 URL
-
-- `https://<username>.github.io/<repo>/`
-
-## Supabase(Auth) 연동 (로그인 먼저 보이게)
-
-이 프로젝트는 Supabase Auth를 사용해서 **첫 화면을 로그인 페이지(`/login`)로 고정**하고, 로그인 세션은 브라우저에 저장되어 **다음 접속부터 자동 로그인**됩니다(로그아웃 지원).
-
-1) Supabase 프로젝트 생성 후, `.env`에 아래 값 추가
+`.env`에 아래 값을 설정합니다.
 
 ```bash
 VITE_SUPABASE_URL=...
 VITE_SUPABASE_ANON_KEY=...
 ```
 
-2) 개발 실행
+환경 변수가 없으면 로그인과 원격 동기화는 비활성화되고, 로컬 상태만 사용할 수 있습니다.
 
-```bash
-npm run dev
-```
+## 데이터 모델
 
-### GitHub Pages 배포 시(중요)
+### 시즌 (`Exam`)
 
-GitHub Actions에서 빌드할 때도 Supabase 환경변수가 필요합니다.
+- 시즌 이름
+- 상태(`active` / `archived`)
+- 시즌 종료일
 
-- GitHub Repo → Settings → Secrets and variables → Actions → New repository secret
-  - `VITE_SUPABASE_URL`
-  - `VITE_SUPABASE_ANON_KEY`
+### 주제 (`Subject`)
+
+- 시즌 소속
+- 이름
+- 색상
+- 보관 여부
+- 통계 제외 여부
+
+### 일정 (`StudyTask`)
+
+- 시즌 / 주제 소속
+- 제목
+- 날짜 / 마감일
+- 계획 시작시간 / 계획 소요시간
+- 완료 시작시간 / 완료 종료시간 / 완료 소요시간
+- 완료 처리 전용 플래그
+- 메모
+
+## 품질 기준
+
+- 실제 완료시간은 자정 넘김을 지원합니다.
+- 마지막 진행중 시즌은 보관할 수 없습니다.
+- 마지막 시즌은 삭제할 수 없습니다.
+- 주제/일정 삭제와 계정 초기화는 확인 절차를 거칩니다.
+
+## 배포
+
+정적 배포 대상은 Vite build 결과물인 `dist/`입니다.

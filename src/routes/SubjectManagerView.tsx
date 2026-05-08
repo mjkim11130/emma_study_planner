@@ -31,11 +31,11 @@ export function SubjectManagerView() {
 
   return (
     <div className="flex flex-col gap-3">
-      <MobileTopBar title="과목 관리" />
+      <MobileTopBar title="주제 관리" />
       <Card>
-        <CardHeader title="과목" />
+        <CardHeader title="주제" />
         <div className="grid grid-cols-1 gap-2 px-4 py-3 md:grid-cols-[1fr_160px_100px]">
-          <Input value={name} onChange={setName} placeholder="과목명 (예: 수학)" />
+          <Input value={name} onChange={setName} placeholder="주제명 (예: 수학)" />
           <div className="flex items-center gap-2">
             <input
               type="color"
@@ -66,7 +66,7 @@ export function SubjectManagerView() {
       </Card>
 
       <Card>
-        <CardHeader title="과목 목록" subtitle="현재 선택한 시즌의 과목만 표시됩니다." />
+        <CardHeader title="주제 목록" subtitle="현재 선택한 시즌의 주제만 표시됩니다." />
         <div className="divide-y divide-slate-100">
           {scopedSubjects.map((s) => (
             <div key={s.id} className="grid grid-cols-1 gap-2 px-4 py-3 md:grid-cols-[1fr_220px_110px]">
@@ -88,12 +88,24 @@ export function SubjectManagerView() {
                 <Input value={s.name} onChange={(v) => updateSubject(s.id, { name: v })} />
               </div>
               <div className="flex items-center justify-end">
-                <Button variant="danger" onClick={() => deleteSubject(s.id)} disabled={(taskCounts.get(s.id) ?? 0) > 0}>
+                <Button
+                  variant="danger"
+                  onClick={() => {
+                    const taskCount = taskCounts.get(s.id) ?? 0
+                    const ok = window.confirm(
+                      taskCount > 0
+                        ? `이 주제를 삭제할까요? 연결된 일정 ${taskCount}개도 함께 삭제됩니다.`
+                        : '이 주제를 삭제할까요?',
+                    )
+                    if (!ok) return
+                    deleteSubject(s.id)
+                  }}
+                >
                   삭제
                 </Button>
               </div>
               {(taskCounts.get(s.id) ?? 0) > 0 ? (
-                <div className="md:col-span-3 text-xs text-slate-500">일정이 있는 과목은 삭제할 수 없어요 (먼저 일정 삭제).</div>
+                <div className="md:col-span-3 text-xs text-slate-500">삭제하면 연결된 일정도 함께 삭제됩니다.</div>
               ) : null}
             </div>
           ))}

@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { randomId } from '../lib/ids'
-import { hmToMinutes } from '../lib/time'
+import { addSecondsToHm, durationSecondsFromHmRange } from '../lib/time'
 import type { Exam, StudyTask, Subject } from './types'
 
 type PlannerState = {
@@ -40,33 +40,19 @@ type PlannerState = {
 }
 
 function computeActualSeconds(startTime?: string, endTime?: string) {
-  if (!startTime || !endTime) return undefined
-  const s = hmToMinutes(startTime)
-  const e = hmToMinutes(endTime)
-  if (s === null || e === null) return undefined
-  const diff = e - s
-  if (diff < 0) return undefined
-  return diff * 60
+  return durationSecondsFromHmRange(startTime, endTime, { allowNextDay: true })
 }
 
 function isInvalidTimeRange(startTime?: string, endTime?: string) {
-  if (!startTime || !endTime) return false
-  const s = hmToMinutes(startTime)
-  const e = hmToMinutes(endTime)
-  if (s === null || e === null) return false
-  return e < s
+  return startTime !== undefined && endTime !== undefined && computeActualSeconds(startTime, endTime) === undefined
 }
 
 function computeActualTimesFromPlanned(input: { plannedStartTime?: string; plannedSeconds?: number }) {
   const plannedStartTime = input.plannedStartTime
   const plannedSeconds = typeof input.plannedSeconds === 'number' ? input.plannedSeconds : 0
   if (!plannedStartTime || !Number.isFinite(plannedSeconds) || plannedSeconds <= 0) return null
-  const startMin = hmToMinutes(plannedStartTime)
-  if (startMin === null) return null
-  const endMin = startMin + plannedSeconds / 60
-  const h = Math.floor(endMin / 60) % 24
-  const m = Math.floor(endMin % 60)
-  const endHm = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+  const endHm = addSecondsToHm(plannedStartTime, plannedSeconds)
+  if (!endHm) return null
   return { actualStartTime: plannedStartTime, actualEndTime: endHm }
 }
 
@@ -133,6 +119,11 @@ export const usePlannerStore = create<PlannerState>()(
       },
       setExamStatus: (examId, status) =>
         set((state) => {
+          if (status === 'archived') {
+            const activeExamCount = state.exams.filter((e) => e.status === 'active').length
+            const target = state.exams.find((e) => e.id === examId)
+            if (target?.status === 'active' && activeExamCount <= 1) return state
+          }
           const updated = state.exams.map((e) => (e.id === examId ? { ...e, status } : e))
           let nextActiveExamId = state.activeExamId
           if (status === 'archived' && state.activeExamId === examId) {
@@ -147,10 +138,12 @@ export const usePlannerStore = create<PlannerState>()(
       deleteExam: (examId) =>
         set((state) => {
           const nextExams = state.exams.filter((e) => e.id !== examId)
+          if (nextExams.length === 0) return state
           const nextSubjects = state.subjects.filter((s) => s.examId !== examId)
           const nextSubjectIds = new Set(nextSubjects.map((s) => s.id))
           const nextTasks = state.tasks.filter((t) => t.examId !== examId && nextSubjectIds.has(t.subjectId))
-          const { [examId]: _removed, ...restOrder } = state.subjectOrderByExam
+          const restOrder = { ...state.subjectOrderByExam }
+          delete restOrder[examId]
 
           let nextActiveExamId = state.activeExamId
           if (state.activeExamId === examId) {

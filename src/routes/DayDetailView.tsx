@@ -1,11 +1,15 @@
-import { addDays, format } from 'date-fns'
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { ymdToDate } from '../lib/dates'
-import { formatDurationKoFromMinutes, formatDurationKoFromSeconds } from '../lib/time'
+import { addDays, format, startOfWeek } from 'date-fns'
+import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { ContextMenu, type ContextMenuItem, type ContextMenuState } from '../components/ContextMenu'
+import { useConfirmDialog } from '../components/ConfirmDialog'
+import { todayYmd, ymdToDate } from '../lib/dates'
+import { formatDurationKoFromMinutes, formatDurationKoFromSeconds, durationSecondsFromHmRange } from '../lib/time'
+import { formatDday } from '../lib/dday'
 import { Button } from '../components/ui'
 import { usePlannerStore } from '../store/usePlannerStore'
 import { MobileTopBar } from '../components/MobileTopBar'
+import { IconCalendarMonth, IconCalendarWeek, IconPlus } from '../components/NavIcons'
 import { useTaskDialog } from '../components/TaskDialogContext'
 import { TimePickerModal } from '../components/TimePicker'
 
@@ -104,17 +108,6 @@ function estimateInlineTextPx(text: string, fontPx = 11) {
   return Math.ceil(text.length * avgCharPx)
 }
 
-function formatDday(dueDate?: string) {
-  if (!dueDate) return ''
-  const today = new Date()
-  const d = new Date(`${dueDate}T00:00:00`)
-  if (Number.isNaN(d.getTime())) return ''
-  const diff = Math.round((d.getTime() - today.setHours(0, 0, 0, 0)) / (24 * 60 * 60 * 1000))
-  if (diff === 0) return 'D-DAY'
-  if (diff > 0) return `D-${diff}`
-  return `D+${Math.abs(diff)}`
-}
-
 type TimelineKind = 'planned' | 'actual'
 
 type TimelineItem = {
@@ -196,16 +189,62 @@ function remToPx(rem: string) {
 
 export function DayDetailView() {
   const navigate = useNavigate()
+  const { confirm } = useConfirmDialog()
   const lastUsedSubjectIdByExam = usePlannerStore((s) => s.lastUsedSubjectIdByExam)
   const params = useParams()
-  const date = params.date ?? ''
-  if (!date) return <Navigate to="/" replace />
+  const date = params.date ?? todayYmd()
   const activeExamId = usePlannerStore((s) => s.activeExamId)
   const subjects = usePlannerStore((s) => s.subjects)
   const allTasks = usePlannerStore((s) => s.tasks)
   const tasks = useMemo(() => allTasks.filter((t) => t.examId === activeExamId && t.date === date), [allTasks, activeExamId, date])
   const updateTask = usePlannerStore((s) => s.updateTask)
+  const deleteTask = usePlannerStore((s) => s.deleteTask)
   const { openTaskAdd, openTaskPreview } = useTaskDialog()
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
+  const openContextMenu = (e: ReactMouseEvent, items: ContextMenuItem[]) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setContextMenu({ x: e.clientX, y: e.clientY, items })
+  }
+  const openDayTaskMenu = (e: ReactMouseEvent, taskId: string) => {
+    openContextMenu(e, [
+      { key: 'timer', label: '타이머', onSelect: () => openTaskPreview(taskId, { autoTimer: true }) },
+      { key: 'edit', label: '편집', onSelect: () => openTaskPreview(taskId, { autoEdit: true }) },
+      {
+        key: 'delete',
+        label: '삭제',
+        danger: true,
+        onSelect: async () => {
+          const ok = await confirm({
+            title: '일정을 삭제할까요?',
+            message: '이 작업은 되돌릴 수 없어요.',
+            confirmLabel: '삭제',
+            danger: true,
+          })
+          if (!ok) return
+          deleteTask(taskId)
+        },
+      },
+    ])
+  }
+  const openDayTimelineMenu = (e: ReactMouseEvent, startMin: number) => {
+    openContextMenu(e, [
+      {
+        key: 'add',
+        label: '일정 추가',
+        icon: <IconPlus className="h-4 w-4" />,
+        onSelect: () => openTaskAdd({ date, plannedStartTime: minutesToHm(startMin), plannedSeconds: 0 }),
+      },
+      { key: 'month', label: '월간 캘린더 보기', icon: <IconCalendarMonth className="h-4 w-4" />, onSelect: () => navigate(`/?month=${encodeURIComponent(date.slice(0, 7))}`) },
+      {
+        key: 'week',
+        label: '주간 캘린더 보기',
+        icon: <IconCalendarWeek className="h-4 w-4" />,
+        onSelect: () =>
+          navigate(`/week?weekStart=${encodeURIComponent(format(startOfWeek(ymdToDate(date), { weekStartsOn: 1 }), 'yyyy-MM-dd'))}`),
+      },
+    ])
+  }
   const [unscheduledOpen, setUnscheduledOpen] = useState(false)
   const [timelineTimePickerOpen, setTimelineTimePickerOpen] = useState(false)
   const [timelineTimePickerField, setTimelineTimePickerField] = useState<null | 'start' | 'end'>(null)
@@ -308,13 +347,15 @@ export function DayDetailView() {
       const plannedStartMin = hmToMinutesLocal(t.plannedStartTime)
 
       if (actualStartMin !== null) {
-        if (actualEndMin !== null && actualEndMin < actualStartMin) continue
-        const durationMinExact =
-          (t.actualSeconds ?? 0) / 60 || (actualEndMin !== null ? actualEndMin - actualStartMin : 0)
+        const durationSeconds =
+          typeof t.actualSeconds === 'number' && Number.isFinite(t.actualSeconds)
+            ? Math.max(0, t.actualSeconds)
+            : durationSecondsFromHmRange(t.actualStartTime, t.actualEndTime, { allowNextDay: true }) ?? 0
+        const durationMinExact = durationSeconds / 60
         const hasDuration = isMeaningfulDuration(durationMinExact)
         const plannedDurationMinExact = (t.plannedSeconds ?? 0) / 60
         const isTinyRecordedRange =
-          actualEndMin !== null && Number.isFinite(actualEndMin) ? Math.max(0, actualEndMin - actualStartMin) < 1 : false
+          actualEndMin !== null && hasDuration ? durationMinExact < 1 : false
         const startMin = actualStartMin
         const endMinExact = Math.min(24 * 60, startMin + Math.max(0, durationMinExact))
         items.push({
@@ -499,6 +540,8 @@ export function DayDetailView() {
         onChangeWindow={(startMin, endMin) => setTimelineWindow({ startMin, endMin })}
         onRequestTimePick={(field) => openTimelineTimePicker(field)}
         onOpenTask={(taskId) => openTaskPreview(taskId)}
+        onOpenTaskMenu={openDayTaskMenu}
+        onOpenCanvasMenu={openDayTimelineMenu}
         onInteractionLockChange={(locked) => setDaySwipeBlocked(locked)}
         onToggleComplete={(taskId, _kind, nextCompleted) => {
           if (nextCompleted) {
@@ -609,11 +652,7 @@ export function DayDetailView() {
                 const plannedSeconds = Number.isFinite(t.plannedSeconds) ? Math.max(0, t.plannedSeconds) : 0
                 const hasPlannedDuration = plannedSeconds > 0
                 const actualSecondsFromTimes = (() => {
-                  const s = hmToMinutesLocal(t.actualStartTime)
-                  const e = hmToMinutesLocal(t.actualEndTime)
-                  if (s === null || e === null) return 0
-                  if (e < s) return 0
-                  return (e - s) * 60
+                  return durationSecondsFromHmRange(t.actualStartTime, t.actualEndTime, { allowNextDay: true }) ?? 0
                 })()
                 const actualSeconds =
                   typeof t.actualSeconds === 'number' && Number.isFinite(t.actualSeconds)
@@ -628,7 +667,7 @@ export function DayDetailView() {
                   plannedStartMin !== null && hasPlannedDuration ? minutesToHm(plannedStartMin + plannedSeconds / 60) : null
                 const actualStartMin = hmToMinutesLocal(t.actualStartTime)
                 const actualEndMin = hmToMinutesLocal(t.actualEndTime)
-                const actualIsTinyRange = actualStartMin !== null && actualEndMin !== null ? Math.max(0, actualEndMin - actualStartMin) < 1 : false
+                const actualIsTinyRange = actualStartMin !== null && actualEndMin !== null ? actualSeconds < 60 : false
                 const plannedIsTinyRange = hasPlannedDuration ? plannedSeconds / 60 < 1 : false
                 const timeLabel =
                   t.actualStartTime || t.actualEndTime
@@ -648,6 +687,7 @@ export function DayDetailView() {
                     key={t.id}
                     type="button"
                     onClick={() => openTaskPreview(t.id)}
+                    onContextMenu={(e) => openDayTaskMenu(e, t.id)}
                     className={`grid w-full select-none grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 px-2 py-3 text-slate-900 hover:bg-slate-50 ${
                       isCompleted ? 'opacity-75' : ''
                     }`}
@@ -1179,12 +1219,13 @@ export function DayDetailView() {
                                             const hasAnyRecord = Boolean(t.actualStartTime || t.actualEndTime || typeof t.actualSeconds === 'number')
                                             const isCompleted = t.status === 'completed' || hasAnyRecord
                                             return (
-                                              <button
-                                                key={t.id}
-                                            type="button"
-                                            onClick={() => openTaskPreview(t.id)}
-                                            draggable
-                                            onDragStart={(e) => {
+	                                              <button
+	                                                key={t.id}
+	                                            type="button"
+	                                            onClick={() => openTaskPreview(t.id)}
+                                                onContextMenu={(e) => openDayTaskMenu(e, t.id)}
+	                                            draggable
+	                                            onDragStart={(e) => {
                                               e.dataTransfer.setData('text/emma-task-id', t.id)
                                               e.dataTransfer.effectAllowed = 'move'
                                             }}
@@ -1254,7 +1295,7 @@ export function DayDetailView() {
         </div>
       </div>
       ) : null}
-
+      <ContextMenu menu={contextMenu} onClose={() => setContextMenu(null)} />
     </div>
   )
 }
@@ -1271,6 +1312,8 @@ function DayTimeline({
   onChangeWindow,
   onRequestTimePick,
   onOpenTask,
+  onOpenTaskMenu,
+  onOpenCanvasMenu,
   onInteractionLockChange,
 }: {
   items: TimelineItem[]
@@ -1284,6 +1327,8 @@ function DayTimeline({
   onChangeWindow: (startMin: number, endMin: number) => void
   onRequestTimePick: (field: 'start' | 'end') => void
   onOpenTask: (taskId: string) => void
+  onOpenTaskMenu?: (e: ReactMouseEvent, taskId: string) => void
+  onOpenCanvasMenu?: (e: ReactMouseEvent, startMin: number) => void
   onInteractionLockChange?: (locked: boolean) => void
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null)
@@ -1494,6 +1539,7 @@ function DayTimeline({
   const handlePointerDown = (e: React.PointerEvent, id: string, kind: TimelineKind, mode: 'move' | 'resize') => {
     // mouse/pen: drag immediately. touch: long-press to drag so vertical scroll still works.
     if (e.pointerType !== 'touch') {
+      if (e.button !== 0) return
       beginDrag(e, id, kind, mode)
       return
     }
@@ -1711,6 +1757,17 @@ function DayTimeline({
         }}
         onDragOver={(e) => e.preventDefault()}
         onDrop={handleDrop}
+        onContextMenu={(e) => {
+          const target = e.target as HTMLElement | null
+          if (target?.closest('[data-timeline-item="true"]')) return
+          if (target?.closest('[data-window-handle="true"]')) return
+          if (!containerRef.current) return
+          const rect = containerRef.current.getBoundingClientRect()
+          const yInViewport = e.clientY - rect.top
+          const minutesRaw = yInViewport / pxPerMin
+          const at = snap10(startMin + minutesRaw)
+          onOpenCanvasMenu?.(e, at)
+        }}
         onPointerMove={handlePointerMove}
         onPointerMoveCapture={handleWindowPointerMove}
         onPointerUp={handlePointerUp}
@@ -1865,13 +1922,14 @@ function DayTimeline({
             const completedTone = it.completed ? 'saturate-[0.85] brightness-[0.97]' : ''
             const dragTone = isDragging ? (active?.outside ? 'ring-2 ring-indigo-500 opacity-80 shadow-xl' : 'ring-2 ring-black/20 shadow-lg') : ''
             return (
-              <div
-                key={`${it.kind}:${it.id}`}
-                data-timeline-item="true"
-                className={`absolute select-none rounded-xl border border-black/10 shadow-sm ${onText} ${completedTone} ${dragTone}`}
-                style={{ top, height, left, right, backgroundColor: bg }}
-                onPointerDown={(e) => handlePointerDown(e, it.id, it.kind, 'move')}
-                role="button"
+	              <div
+	                key={`${it.kind}:${it.id}`}
+	                data-timeline-item="true"
+	                className={`absolute select-none rounded-xl border border-black/10 shadow-sm ${onText} ${completedTone} ${dragTone}`}
+	                style={{ top, height, left, right, backgroundColor: bg }}
+	                onPointerDown={(e) => handlePointerDown(e, it.id, it.kind, 'move')}
+                    onContextMenu={(e) => onOpenTaskMenu?.(e, it.id)}
+	                role="button"
                 tabIndex={0}
                 aria-label={`${it.title} ${timeLabel} ${it.kind === 'actual' ? '완료' : '계획'}`}
               >

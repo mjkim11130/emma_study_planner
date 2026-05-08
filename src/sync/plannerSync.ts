@@ -1,6 +1,7 @@
 import type { User } from '@supabase/supabase-js'
 import { getSupabase, supabaseConfigOk } from '../lib/supabaseClient'
 import { usePlannerStore } from '../store/usePlannerStore'
+import type { Exam, StudyTask, Subject } from '../store/types'
 
 type RemoteRow = {
   user_id: string
@@ -13,6 +14,7 @@ type PlannerData = {
   activeExamId: unknown
   subjects: unknown
   tasks: unknown
+  lastUsedSubjectIdByExam?: unknown
   subjectOrderByExam?: unknown
 }
 
@@ -24,18 +26,120 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
+function normalizeStringRecord(input: unknown) {
+  if (!isObject(input)) return {}
+  return Object.fromEntries(
+    Object.entries(input)
+      .filter(([key, value]) => Boolean(key) && typeof value === 'string' && value),
+  ) as Record<string, string>
+}
+
+function normalizeStringArrayRecord(input: unknown) {
+  if (!isObject(input)) return {}
+  return Object.fromEntries(
+    Object.entries(input).map(([key, value]) => [
+      key,
+      Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string' && item.length > 0) : [],
+    ]),
+  ) as Record<string, string[]>
+}
+
+function normalizeExam(input: unknown): Exam | null {
+  if (!isObject(input) || typeof input.id !== 'string') return null
+  return {
+    id: input.id,
+    name: typeof input.name === 'string' && input.name.trim() ? input.name : '시즌',
+    status: input.status === 'archived' ? 'archived' : 'active',
+    examDate: typeof input.examDate === 'string' && input.examDate ? input.examDate : undefined,
+    createdAt: typeof input.createdAt === 'string' && input.createdAt ? input.createdAt : nowIso(),
+  }
+}
+
+function normalizeSubject(input: unknown, fallbackExamId: string): Subject | null {
+  if (!isObject(input) || typeof input.id !== 'string') return null
+  return {
+    id: input.id,
+    examId: typeof input.examId === 'string' && input.examId ? input.examId : fallbackExamId,
+    name: typeof input.name === 'string' && input.name.trim() ? input.name : '주제',
+    color: typeof input.color === 'string' && input.color ? input.color : '#94a3b8',
+    archived: Boolean(input.archived),
+    isRest: Boolean(input.isRest),
+    createdAt: typeof input.createdAt === 'string' && input.createdAt ? input.createdAt : nowIso(),
+  }
+}
+
+function normalizeTask(input: unknown, fallbackExamId: string): StudyTask | null {
+  if (!isObject(input) || typeof input.id !== 'string' || typeof input.subjectId !== 'string') return null
+  const plannedSeconds =
+    typeof input.plannedSeconds === 'number' && Number.isFinite(input.plannedSeconds) ? Math.max(0, Math.floor(input.plannedSeconds)) : 0
+  const actualSeconds =
+    typeof input.actualSeconds === 'number' && Number.isFinite(input.actualSeconds) ? Math.max(0, Math.floor(input.actualSeconds)) : undefined
+
+  return {
+    id: input.id,
+    examId: typeof input.examId === 'string' && input.examId ? input.examId : fallbackExamId,
+    subjectId: input.subjectId,
+    title: typeof input.title === 'string' ? input.title : '',
+    date: typeof input.date === 'string' ? input.date : '',
+    dueDate: typeof input.dueDate === 'string' && input.dueDate ? input.dueDate : undefined,
+    plannedStartTime: typeof input.plannedStartTime === 'string' && input.plannedStartTime ? input.plannedStartTime : undefined,
+    plannedSeconds,
+    actualStartTime: typeof input.actualStartTime === 'string' && input.actualStartTime ? input.actualStartTime : undefined,
+    actualEndTime: typeof input.actualEndTime === 'string' && input.actualEndTime ? input.actualEndTime : undefined,
+    actualSeconds,
+    recordCompleteOnly: Boolean(input.recordCompleteOnly),
+    status: input.status === 'completed' ? 'completed' : 'pending',
+    memo: typeof input.memo === 'string' && input.memo ? input.memo : undefined,
+    createdAt: typeof input.createdAt === 'string' && input.createdAt ? input.createdAt : nowIso(),
+    updatedAt: typeof input.updatedAt === 'string' && input.updatedAt ? input.updatedAt : typeof input.createdAt === 'string' && input.createdAt ? input.createdAt : nowIso(),
+  }
+}
+
+function latestLocalTimestamp() {
+  const state = usePlannerStore.getState()
+  const isFreshSeed =
+    state.tasks.length === 0 &&
+    state.exams.length === 1 &&
+    state.subjects.length === 2 &&
+    state.activeExamId === state.exams[0]?.id &&
+    state.exams[0]?.name === '새 시즌' &&
+    state.exams[0]?.status === 'active' &&
+    !state.exams[0]?.examDate &&
+    state.subjects.every((subject) => subject.examId === state.exams[0]?.id) &&
+    state.subjects.some((subject) => subject.name === '중요') &&
+    state.subjects.some((subject) => subject.name === '일반')
+
+  if (isFreshSeed) return ''
+
+  return [
+    ...state.exams.map((exam) => exam.createdAt),
+    ...state.subjects.map((subject) => subject.createdAt),
+    ...state.tasks.map((task) => task.updatedAt || task.createdAt),
+  ]
+    .filter((value) => typeof value === 'string' && value.length > 0)
+    .sort()
+    .at(-1) ?? ''
+}
+
 function pickPlannerData(input: unknown) {
   if (!isObject(input)) return null
   const data = input as PlannerData
   if (!Array.isArray(data.exams) || !Array.isArray(data.subjects) || !Array.isArray(data.tasks)) return null
   if (typeof data.activeExamId !== 'string') return null
-  const subjectOrderByExam = isObject(data.subjectOrderByExam) ? data.subjectOrderByExam : undefined
+
+  const exams = data.exams.map(normalizeExam).filter((value): value is Exam => value !== null)
+  const fallbackExamId = exams[0]?.id ?? ''
+  if (!fallbackExamId) return null
+  const subjects = data.subjects.map((subject) => normalizeSubject(subject, fallbackExamId)).filter((value): value is Subject => value !== null)
+  const tasks = data.tasks.map((task) => normalizeTask(task, fallbackExamId)).filter((value): value is StudyTask => value !== null)
+
   return {
-    exams: data.exams,
-    activeExamId: data.activeExamId,
-    subjects: data.subjects,
-    tasks: data.tasks,
-    ...(subjectOrderByExam ? { subjectOrderByExam } : {}),
+    exams,
+    activeExamId: data.activeExamId || fallbackExamId,
+    subjects,
+    tasks,
+    lastUsedSubjectIdByExam: normalizeStringRecord(data.lastUsedSubjectIdByExam),
+    subjectOrderByExam: normalizeStringArrayRecord(data.subjectOrderByExam),
   }
 }
 
@@ -61,21 +165,23 @@ export async function startPlannerSync(user: User): Promise<SyncHandle> {
 
   if (!stopped && !error && remote?.data) {
     const next = pickPlannerData(remote.data)
-    if (next) {
+    const localIsNewer = Boolean(remote.updated_at && latestLocalTimestamp() > remote.updated_at)
+    if (next && !localIsNewer) {
       // IMPORTANT: don't replace the whole zustand state; it would wipe action functions.
       // Only merge in the serializable planner data fields.
-      usePlannerStore.setState(next as any, false)
+      usePlannerStore.setState(next, false)
     }
   }
 
   const push = async () => {
     if (stopped) return
-    const state = usePlannerStore.getState() as any
+    const state = usePlannerStore.getState()
     const data = {
       exams: state.exams,
       activeExamId: state.activeExamId,
       subjects: state.subjects,
       tasks: state.tasks,
+      lastUsedSubjectIdByExam: state.lastUsedSubjectIdByExam,
       subjectOrderByExam: state.subjectOrderByExam,
     }
     const payload = {

@@ -20,17 +20,21 @@ import {
   useMemo,
   useRef,
   useState,
+  type MouseEvent as ReactMouseEvent,
   type ReactNode,
   type WheelEvent as ReactWheelEvent,
 } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
+import { ContextMenu, type ContextMenuItem, type ContextMenuState } from '../components/ContextMenu'
+import { useConfirmDialog } from '../components/ConfirmDialog'
 import { todayYmd } from '../lib/dates'
-import { formatDurationKoFromSeconds } from '../lib/time'
+import { formatDday } from '../lib/dday'
 import { Button } from '../components/ui'
 import { DurationPickerButton } from '../components/DurationPicker'
 import { TimePickerModal } from '../components/TimePicker'
 import { usePlannerStore } from '../store/usePlannerStore'
 import { MobileTopBar } from '../components/MobileTopBar'
+import { IconCalendarViewDay, IconCalendarWeek, IconChecklist, IconPlus } from '../components/NavIcons'
 import { TaskTimerModal } from '../components/TaskTimerModal'
 import { TaskDialogShell } from '../components/TaskDialogShell'
 import type { StudyTask } from '../store/types'
@@ -181,6 +185,7 @@ export function CalendarView() {
   const DRAFT_TASK_ID = '__draft_task__'
   const location = useLocation()
   const navigate = useNavigate()
+  const { confirm } = useConfirmDialog()
   const [searchParams, setSearchParams] = useSearchParams()
   const activeExamId = usePlannerStore((s) => s.activeExamId)
   const activeExam = usePlannerStore(useMemo(() => (s) => s.exams.find((e) => e.id === activeExamId), [activeExamId]))
@@ -190,7 +195,6 @@ export function CalendarView() {
   const addTask = usePlannerStore((s) => s.addTask)
   const updateTask = usePlannerStore((s) => s.updateTask)
   const deleteTask = usePlannerStore((s) => s.deleteTask)
-  const today = useMemo(() => parseISO(todayYmd()), [])
   const [startOpen, setStartOpen] = useState(false)
   const [addDraft, setAddDraft] = useState<StudyTask | null>(null)
   const [editTaskId, setEditTaskId] = useState<string | null>(null)
@@ -273,14 +277,6 @@ export function CalendarView() {
     return L > 0.5 ? '#0f172a' : '#ffffff'
   }
 
-  const formatDday = (dueDate?: string) => {
-    if (!dueDate) return null
-    const end = parseISO(dueDate)
-    const diffDays = differenceInCalendarDays(end, today) // due - today
-    if (diffDays === 0) return 'D-Day'
-    return diffDays > 0 ? `D-${diffDays}` : `D+${Math.abs(diffDays)}`
-  }
-
   const measureUnits = (text: string) => {
     let units = 0
     for (const ch of text) {
@@ -314,8 +310,30 @@ export function CalendarView() {
     return out
   }
 
-  const [displayMonth, setDisplayMonth] = useState(() => format(parseISO(todayYmd()), 'yyyy-MM'))
+  const defaultDisplayMonth = format(parseISO(todayYmd()), 'yyyy-MM')
+  const monthParam = searchParams.get('month') ?? ''
+  const [displayMonth, setDisplayMonthState] = useState(() =>
+    /^\d{4}-\d{2}$/.test(monthParam) ? monthParam : defaultDisplayMonth,
+  )
   const [dragOverDate, setDragOverDate] = useState<string | null>(null)
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
+  const setDisplayMonth = (next: string) => {
+    setDisplayMonthState(next)
+    setSearchParams(
+      (prev) => {
+        const p = new URLSearchParams(prev)
+        if (next === defaultDisplayMonth) p.delete('month')
+        else p.set('month', next)
+        return p
+      },
+      { replace: true },
+    )
+  }
+  const openContextMenu = (e: ReactMouseEvent, items: ContextMenuItem[]) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setContextMenu({ x: e.clientX, y: e.clientY, items })
+  }
   const buildMonthWeeks = (month: string) => {
     const monthStart = parseISO(`${month}-01`)
     const gridStart = startOfWeek(monthStart, { weekStartsOn: 1 })
@@ -329,6 +347,11 @@ export function CalendarView() {
   const nextMonth = useMemo(() => format(addMonths(parseISO(`${displayMonth}-01`), 1), 'yyyy-MM'), [displayMonth])
   const prevMonthWeeks = useMemo(() => buildMonthWeeks(prevMonth), [prevMonth])
   const nextMonthWeeks = useMemo(() => buildMonthWeeks(nextMonth), [nextMonth])
+
+  useEffect(() => {
+    const next = /^\d{4}-\d{2}$/.test(monthParam) ? monthParam : defaultDisplayMonth
+    if (next !== displayMonth) setDisplayMonthState(next)
+  }, [monthParam, defaultDisplayMonth, displayMonth])
 
   const [monthDragX, setMonthDragX] = useState(0)
   const [isMonthDragging, setIsMonthDragging] = useState(false)
@@ -400,6 +423,45 @@ export function CalendarView() {
     if (opts?.autoCloseAfterComplete) next.set('autoClose', '1')
     else next.delete('autoClose')
     setSearchParams(next, { replace: true })
+  }
+
+  const openMonthTaskMenu = (e: ReactMouseEvent, task: StudyTask) => {
+    openContextMenu(e, [
+      {
+        key: 'timer',
+        label: '타이머',
+        onSelect: () => {
+          openPreviewTask(task.id)
+          setTimerTaskId(task.id)
+        },
+      },
+      { key: 'edit', label: '편집', onSelect: () => openPreviewTask(task.id, { autoEdit: true }) },
+      {
+        key: 'delete',
+        label: '삭제',
+        danger: true,
+        onSelect: async () => {
+          const ok = await confirm({
+            title: '일정을 삭제할까요?',
+            message: '이 작업은 되돌릴 수 없어요.',
+            confirmLabel: '삭제',
+            danger: true,
+          })
+          if (!ok) return
+          deleteTask(task.id)
+        },
+      },
+    ])
+  }
+
+  const openMonthDateMenu = (e: ReactMouseEvent, ymd: string) => {
+    const weekStart = format(startOfWeek(parseISO(ymd), { weekStartsOn: 1 }), 'yyyy-MM-dd')
+    openContextMenu(e, [
+      { key: 'add', label: '일정 추가', icon: <IconPlus className="h-4 w-4" />, onSelect: () => openTaskAdd({ date: ymd }) },
+      { key: 'week', label: '주간 캘린더 보기', icon: <IconCalendarWeek className="h-4 w-4" />, onSelect: () => navigate(`/week?weekStart=${encodeURIComponent(weekStart)}`) },
+      { key: 'timeline', label: '타임라인 보기', icon: <IconCalendarViewDay className="h-4 w-4" />, onSelect: () => navigate(`/day/${ymd}`) },
+      { key: 'planned', label: '일일 계획 보기', icon: <IconChecklist className="h-4 w-4" />, onSelect: () => navigate(`/day/${ymd}?view=planned`) },
+    ])
   }
 
   const openTaskAdd = (initial?: { date?: string }) => {
@@ -945,6 +1007,7 @@ export function CalendarView() {
                   if (e.key === 'Enter' || e.key === ' ') navigate(`/day/${ymd}`)
                 }}
                 onPointerDown={(e) => {
+                  if (e.pointerType === 'mouse' && e.button !== 0) return
                   if ((e.target as HTMLElement | null)?.closest('button')) return
                   if (longPressRef.current.timer) window.clearTimeout(longPressRef.current.timer)
                   longPressRef.current.armed = false
@@ -983,6 +1046,7 @@ export function CalendarView() {
                   setPressedDayYmd(null)
                 }}
                 onPointerUp={(e) => {
+                  if (e.pointerType === 'mouse' && e.button !== 0) return
                   if (longPressRef.current.timer) window.clearTimeout(longPressRef.current.timer)
                   longPressRef.current.timer = null
                   const armed = longPressRef.current.armed
@@ -1030,6 +1094,7 @@ export function CalendarView() {
                   if (taskId) updateTask(taskId, { date: ymd })
                   setDragOverDate(null)
                 }}
+                onContextMenu={(e) => openMonthDateMenu(e, ymd)}
                 className={`relative flex min-h-0 cursor-pointer flex-col overflow-hidden border-b border-r border-slate-100 p-1.5 md:p-2 ${
                   isCurrentMonth ? 'bg-white' : 'bg-slate-50'
                 }`}
@@ -1067,15 +1132,23 @@ export function CalendarView() {
                     const hasActual = typeof t.actualSeconds === 'number' && Number.isFinite(t.actualSeconds)
                     const hasAnyRecord = Boolean(t.actualStartTime || t.actualEndTime || hasActual)
                     const isCompleted = t.status === 'completed' || hasAnyRecord
-                    const secondsToShow = hasActual ? (t.actualSeconds as number) : t.plannedSeconds
-                    const timeLabelKo = formatDurationKoFromSeconds(secondsToShow)
-                    const desktopTagText = isCompleted ? '✓' : dday ? dday : t.plannedSeconds > 0 ? timeLabelKo : null
+                    const desktopTagText = isCompleted ? '✓' : dday
                     const mobileMaxUnits = 14
-                    const desktopMaxUnits = 22
+                    const desktopMaxUnits = 28
                     const titleMaxUnitsMobile = mobileMaxUnits
-                    const titleMaxUnitsDesktop = desktopMaxUnits - measureUnits(desktopTagText ?? '') - 1
+                    const desktopTagChromeUnits = desktopTagText ? 5 : 0
+                    const titleMaxUnitsDesktopWithTag = Math.max(
+                      0,
+                      desktopMaxUnits - measureUnits(desktopTagText ?? '') - desktopTagChromeUnits,
+                    )
                     const titleMobile = truncateToUnits(t.title, titleMaxUnitsMobile)
-                    const titleDesktop = truncateToUnits(t.title, titleMaxUnitsDesktop)
+                    const minReadableTitleUnitsForTag = 12
+                    const shouldShowDesktopTag =
+                      Boolean(desktopTagText) && titleMaxUnitsDesktopWithTag >= minReadableTitleUnitsForTag
+                    const titleDesktop = truncateToUnits(
+                      t.title,
+                      shouldShowDesktopTag ? titleMaxUnitsDesktopWithTag : desktopMaxUnits,
+                    )
 
                     return (
                       <button
@@ -1091,6 +1164,7 @@ export function CalendarView() {
                           e.dataTransfer.effectAllowed = 'move'
                         }}
                         onDragEnd={() => setDragOverDate(null)}
+                        onContextMenu={(e) => openMonthTaskMenu(e, t)}
                         className={`box-border block w-full select-none rounded-[3px] py-[1px] pl-1.5 pr-0 text-left text-[11px] leading-tight active:cursor-grabbing md:py-0.5 md:pl-2 md:text-[11px] ${
 	                          flashTaskId === t.id ? 'emma-flash-3' : ''
 	                        }`}
@@ -1109,7 +1183,7 @@ export function CalendarView() {
                               </span>
                             </span>
                           ) : null}
-                          {desktopTagText ? (
+                          {shouldShowDesktopTag && desktopTagText ? (
                             <span className="hidden shrink-0 tabular-nums text-[9px] font-semibold leading-none tracking-tighter md:inline">
                               <span
                                 className={`px-1 py-[1px] ${
@@ -1907,7 +1981,14 @@ export function CalendarView() {
 	                    </button>
 	                    <button
 	                      type="button"
-	                      onClick={() => {
+	                      onClick={async () => {
+	                        const ok = await confirm({
+	                          title: '일정을 삭제할까요?',
+	                          message: '이 작업은 되돌릴 수 없어요.',
+	                          confirmLabel: '삭제',
+	                          danger: true,
+	                        })
+	                        if (!ok) return
 	                        deleteTask(previewTask.id)
 	                        closePreviewTask()
 	                      }}
@@ -2047,12 +2128,33 @@ export function CalendarView() {
 		                  if (timePickerField === 'actualStartTime') {
 		                    patchPreviewTask({
 		                      actualStartTime: hm,
-		                      actualEndTime: previewTask.actualEndTime ? previewTask.actualEndTime : hm,
+		                      actualSeconds: previewTask.actualEndTime ? undefined : previewTask.actualSeconds,
+		                      recordCompleteOnly: false,
+		                      status: 'completed',
 		                    })
 		                  } else if (timePickerField === 'actualEndTime') {
+		                    const startMin = hmToMinutes(previewTask.actualStartTime ?? null)
+		                    const endMin = hmToMinutes(hm)
+		                    if (endMin === null) return
+		                    if (startMin !== null) {
+		                      if (endMin === startMin) return
+		                      const { minutes, wraps } = diffMinutesAllowNextDay(startMin, endMin)
+		                      if (minutes > 10 * 60) return
+		                      if (wraps) setEditWarningMessage('종료시간이 시작시간보다 빨라서, 다음날까지 진행한 것으로 계산돼요.')
+		                      patchPreviewTask({
+		                        actualEndTime: hm,
+		                        actualSeconds: minutes > 0 ? minutes * 60 : undefined,
+		                        recordCompleteOnly: false,
+		                        status: 'completed',
+		                      })
+		                      return
+		                    }
 		                    patchPreviewTask({
-		                      actualEndTime: hm,
-		                      actualStartTime: previewTask.actualStartTime ? previewTask.actualStartTime : hm,
+		                      actualStartTime: hm,
+		                      actualEndTime: undefined,
+		                      actualSeconds: undefined,
+		                      recordCompleteOnly: false,
+		                      status: 'completed',
 		                    })
 		                  } else if (timePickerField === 'plannedEndTime') {
 		                    const startMin = hmToMinutes(previewTask.plannedStartTime ?? null)
@@ -2343,13 +2445,14 @@ export function CalendarView() {
 	                        )
 	                      })}
                     </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          ) : null}
+	                  </div>
+	                </div>
+	              </div>
+	            </div>
+	          ) : null}
+          <ContextMenu menu={contextMenu} onClose={() => setContextMenu(null)} />
           </div>
         </div>
 	    </div>
-	  )
+  )
 }

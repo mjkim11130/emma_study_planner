@@ -10,7 +10,9 @@ import { TaskTimerModal } from './TaskTimerModal'
 import { usePlannerStore } from '../store/usePlannerStore'
 import type { StudyTask } from '../store/types'
 import { useTaskDialog } from './TaskDialogContext'
+import { useConfirmDialog } from './ConfirmDialog'
 import { buildTimeSummaryNode, formatDurationPreciseKo } from '../lib/taskTimeSummary'
+import { formatDday } from '../lib/dday'
 
 const DRAFT_TASK_ID = '__draft__task__'
 
@@ -67,17 +69,6 @@ function formatTaskPreviewDate(ymd?: string) {
 function formatDueDateLabel(ymd?: string) {
   if (!ymd) return null
   return `${format(parseISO(ymd), 'M월 d일')}까지 마감`
-}
-
-function formatDday(dueDate?: string) {
-  if (!dueDate) return ''
-  const today = new Date()
-  const d = new Date(`${dueDate}T00:00:00`)
-  if (Number.isNaN(d.getTime())) return ''
-  const diff = Math.round((d.getTime() - today.setHours(0, 0, 0, 0)) / (24 * 60 * 60 * 1000))
-  if (diff === 0) return 'D-DAY'
-  if (diff > 0) return `D-${diff}`
-  return `D+${Math.abs(diff)}`
 }
 
 function formatDurationGraphKo(totalSeconds: number) {
@@ -176,6 +167,7 @@ function CompareRail({
 
 export function TaskDialog() {
   const { request, clearRequest } = useTaskDialog()
+  const { confirm } = useConfirmDialog()
   const activeExamId = usePlannerStore((s) => s.activeExamId)
   const subjects = usePlannerStore((s) => s.subjects)
   const tasks = usePlannerStore((s) => s.tasks)
@@ -277,7 +269,7 @@ export function TaskDialog() {
     if (request.mode === 'preview') {
       setEditTaskId(request.autoEdit ? request.taskId : null)
       setAutoCloseAfterCompleteTaskId(request.autoCloseAfterComplete ? request.taskId : null)
-      setTimerTaskId(null)
+      setTimerTaskId(request.autoTimer ? request.taskId : null)
     }
   }, [request])
 
@@ -1053,7 +1045,14 @@ export function TaskDialog() {
               </button>
               <button
                 type="button"
-                onClick={() => {
+                onClick={async () => {
+                  const ok = await confirm({
+                    title: '일정을 삭제할까요?',
+                    message: '이 작업은 되돌릴 수 없어요.',
+                    confirmLabel: '삭제',
+                    danger: true,
+                  })
+                  if (!ok) return
                   deleteTask(previewTask.id)
                   close()
                 }}
@@ -1171,11 +1170,21 @@ export function TaskDialog() {
             setEditWarningMessage(null)
             if (timePickerField === 'actualStartTime') {
               const startMin = hmToMinutes(hm)
+              const endMin = hmToMinutes(previewTask.actualEndTime ?? null)
               if (startMin === null) return
+              let nextActualSeconds = previewTask.actualEndTime ? actualSecondsDraft : undefined
+              if (endMin !== null) {
+                if (endMin === startMin) return
+                const diffMin = endMin > startMin ? endMin - startMin : endMin + 24 * 60 - startMin
+                if (diffMin > 10 * 60) return
+                if (endMin < startMin) setEditWarningMessage('종료시간이 시작시간보다 빨라서, 다음날까지 진행한 것으로 계산돼요.')
+                nextActualSeconds = Math.max(0, diffMin * 60)
+                setActualSecondsDraft(nextActualSeconds)
+              }
               patchPreviewTask({
                 actualStartTime: hm,
                 // do not auto-fill end time; start-only is allowed
-                actualSeconds: previewTask.actualEndTime ? actualSecondsDraft : undefined,
+                actualSeconds: nextActualSeconds,
                 recordCompleteOnly: false,
                 status: 'completed',
               })

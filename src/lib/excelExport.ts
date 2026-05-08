@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx'
 import type { StudyTask, Subject } from '../store/types'
+import { durationSecondsFromHmRange } from './time'
 
 function hmToMinutes(hm?: string) {
   if (!hm) return null
@@ -74,11 +75,7 @@ export function exportSeasonTasksToXlsx(opts: {
       const actualStart = t.actualStartTime ?? ''
       const actualEnd = t.actualEndTime ?? ''
       const actualSecondsFromTimes = (() => {
-        const s = hmToMinutes(t.actualStartTime)
-        const e = hmToMinutes(t.actualEndTime)
-        if (s == null || e == null) return 0
-        if (e < s) return 0
-        return (e - s) * 60
+        return durationSecondsFromHmRange(t.actualStartTime, t.actualEndTime, { allowNextDay: true }) ?? 0
       })()
       const actualSeconds =
         typeof t.actualSeconds === 'number' && Number.isFinite(t.actualSeconds)
@@ -160,4 +157,3 @@ export function exportSeasonTasksToXlsx(opts: {
   a.remove()
   window.setTimeout(() => URL.revokeObjectURL(url), 0)
 }
-

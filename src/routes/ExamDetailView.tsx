@@ -10,6 +10,7 @@ export function ExamDetailView() {
   const examId = params.examId ?? ''
 
   const exam = usePlannerStore(useMemo(() => (s) => s.exams.find((e) => e.id === examId), [examId]))
+  const exams = usePlannerStore((s) => s.exams)
   const subjects = usePlannerStore((s) => s.subjects)
   const tasks = usePlannerStore((s) => s.tasks)
 
@@ -19,6 +20,7 @@ export function ExamDetailView() {
   const deleteExam = usePlannerStore((s) => s.deleteExam)
 
   const scopedSubjects = useMemo(() => subjects.filter((s) => s.examId === examId), [subjects, examId])
+  const activeExamCount = useMemo(() => exams.filter((item) => item.status === 'active').length, [exams])
   const scopedSubjectIds = useMemo(() => new Set(scopedSubjects.map((s) => s.id)), [scopedSubjects])
   const scopedTasks = useMemo(() => tasks.filter((t) => t.examId === examId && scopedSubjectIds.has(t.subjectId)), [tasks, examId, scopedSubjectIds])
 
@@ -33,7 +35,7 @@ export function ExamDetailView() {
   if (!exam) {
     return (
       <Card>
-        <CardHeader title="Season Detail" subtitle="존재하지 않는 시즌입니다." />
+        <CardHeader title="시즌 상세" subtitle="존재하지 않는 시즌입니다." />
         <div className="px-4 py-3">
           <Button variant="secondary" onClick={() => navigate('/settings')}>
             설정으로
@@ -46,7 +48,7 @@ export function ExamDetailView() {
   return (
     <div className="flex flex-col gap-3">
       <Card>
-        <CardHeader title="Season Detail" subtitle="시즌 단위로 과목/일정이 분리됩니다." />
+        <CardHeader title="시즌 상세" subtitle="시즌 단위로 주제/일정이 분리됩니다." />
         <div className="grid grid-cols-1 gap-3 px-4 py-4 md:grid-cols-[1fr_180px]">
           <div className="flex flex-col gap-2">
             <div className="text-xs font-semibold text-slate-600">시즌 이름</div>
@@ -73,7 +75,7 @@ export function ExamDetailView() {
           <div className="flex flex-col gap-2">
             <Button onClick={() => setActiveExam(exam.id)}>현재 시즌으로 선택</Button>
             {exam.status === 'active' ? (
-              <Button variant="secondary" onClick={() => setExamStatus(exam.id, 'archived')}>
+              <Button variant="secondary" onClick={() => setExamStatus(exam.id, 'archived')} disabled={activeExamCount <= 1}>
                 보관하기
               </Button>
             ) : (
@@ -83,7 +85,9 @@ export function ExamDetailView() {
             )}
             <Button
               variant="danger"
+              disabled={exams.length <= 1}
               onClick={() => {
+                if (exams.length <= 1) return
                 const ok = window.confirm('이 시즌을 삭제할까요? 해당 시즌의 과목/일정도 함께 삭제됩니다.')
                 if (!ok) return
                 deleteExam(exam.id)
@@ -92,15 +96,18 @@ export function ExamDetailView() {
             >
               삭제
             </Button>
-            <div className="mt-1 text-xs text-slate-500">과목/일정 수: {scopedSubjects.length} / {stats.taskCount}</div>
+            <div className="mt-1 text-xs text-slate-500">주제/일정 수: {scopedSubjects.length} / {stats.taskCount}</div>
+            {exam.status === 'active' && activeExamCount <= 1 ? (
+              <div className="text-xs text-slate-500">마지막 진행중 시즌은 보관할 수 없어요.</div>
+            ) : null}
           </div>
         </div>
       </Card>
 
       <Card>
-        <CardHeader title="과목" subtitle={`${scopedSubjects.length}개`} />
+        <CardHeader title="주제" subtitle={`${scopedSubjects.length}개`} />
         <div className="divide-y divide-slate-100">
-          {scopedSubjects.length === 0 ? <div className="px-4 py-4 text-sm text-slate-500">과목이 없어요.</div> : null}
+          {scopedSubjects.length === 0 ? <div className="px-4 py-4 text-sm text-slate-500">주제가 없어요.</div> : null}
           {scopedSubjects.map((s) => (
             <Link key={s.id} to={`/dashboard/${s.id}`} className="block px-4 py-3 hover:bg-slate-50">
               <div className="flex items-center gap-2">
