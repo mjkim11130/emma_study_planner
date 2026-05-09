@@ -152,8 +152,10 @@ export async function startPlannerSync(user: User): Promise<SyncHandle> {
 
   const supabase = getSupabase()
   let stopped = false
-  let lastPushed = ''
+  let lastSynced = ''
   let debounceTimer: number | null = null
+  let pushInFlight = false
+  let pushQueued = false
 
   // 1) Pull existing state from server (if any) and replace local.
   // Server wins on initial sync to enable multi-device continuation.
@@ -170,13 +172,20 @@ export async function startPlannerSync(user: User): Promise<SyncHandle> {
       // IMPORTANT: don't replace the whole zustand state; it would wipe action functions.
       // Only merge in the serializable planner data fields.
       usePlannerStore.setState(next, false)
+      lastSynced = JSON.stringify({
+        exams: next.exams,
+        activeExamId: next.activeExamId,
+        subjects: next.subjects,
+        tasks: next.tasks,
+        lastUsedSubjectIdByExam: next.lastUsedSubjectIdByExam,
+        subjectOrderByExam: next.subjectOrderByExam,
+      })
     }
   }
 
-  const push = async () => {
-    if (stopped) return
+  const currentPlannerData = () => {
     const state = usePlannerStore.getState()
-    const data = {
+    return {
       exams: state.exams,
       activeExamId: state.activeExamId,
       subjects: state.subjects,
@@ -184,31 +193,63 @@ export async function startPlannerSync(user: User): Promise<SyncHandle> {
       lastUsedSubjectIdByExam: state.lastUsedSubjectIdByExam,
       subjectOrderByExam: state.subjectOrderByExam,
     }
+  }
+
+  const push = async () => {
+    if (stopped) return
+    if (!navigator.onLine) return
+    if (pushInFlight) {
+      pushQueued = true
+      return
+    }
+
+    const data = currentPlannerData()
+    const nextKey = JSON.stringify(data)
+    if (nextKey === lastSynced) return
+
+    pushInFlight = true
     const payload = {
       user_id: user.id,
       data,
       updated_at: nowIso(),
     }
 
-    const nextKey = JSON.stringify(payload.data)
-    if (nextKey === lastPushed) return
-    lastPushed = nextKey
-
-    await supabase.from('planner_state').upsert(payload, { onConflict: 'user_id' })
+    try {
+      const { error } = await supabase.from('planner_state').upsert(payload, { onConflict: 'user_id' })
+      if (!error) lastSynced = nextKey
+    } finally {
+      pushInFlight = false
+      if (pushQueued) {
+        pushQueued = false
+        schedulePush(200)
+      }
+    }
   }
 
-  const schedulePush = () => {
+  const schedulePush = (delay = 900) => {
     if (stopped) return
     if (debounceTimer) window.clearTimeout(debounceTimer)
     debounceTimer = window.setTimeout(() => {
       debounceTimer = null
       void push()
-    }, 900)
+    }, delay)
   }
 
   const unsubscribe = usePlannerStore.subscribe(() => {
     schedulePush()
   })
+
+  const handleOnline = () => {
+    schedulePush(100)
+  }
+
+  const handleVisible = () => {
+    if (document.visibilityState !== 'visible') return
+    schedulePush(100)
+  }
+
+  window.addEventListener('online', handleOnline)
+  document.addEventListener('visibilitychange', handleVisible)
 
   // Push once after initial subscribe so new accounts persist quickly.
   schedulePush()
@@ -217,6 +258,8 @@ export async function startPlannerSync(user: User): Promise<SyncHandle> {
     stop: () => {
       stopped = true
       if (debounceTimer) window.clearTimeout(debounceTimer)
+      window.removeEventListener('online', handleOnline)
+      document.removeEventListener('visibilitychange', handleVisible)
       unsubscribe()
     },
   }
