@@ -11,7 +11,7 @@ import { todayYmd } from '../lib/dates'
 import { useTaskDialog } from '../components/TaskDialogContext'
 import { usePlannerStore } from '../store/usePlannerStore'
 import type { StudyTask } from '../store/types'
-import { getTaskDragId, setTaskDragData, syncTaskDropEffect } from '../lib/taskDrag'
+import { getTaskDragId, setTaskDragData, setTaskDragPreview, syncTaskDropEffect } from '../lib/taskDrag'
 import { copyTaskToClipboard, getTaskClipboard, pasteTaskFromClipboard } from '../lib/taskClipboard'
 import { useTouchContextMenu } from '../lib/useTouchContextMenu'
 
@@ -279,6 +279,7 @@ export function WeekView() {
         draggable
         onDragStart={(e) => {
           setTaskDragData(e.dataTransfer, t.id)
+          setTaskDragPreview(e.dataTransfer, e.currentTarget, e.clientX, e.clientY)
         }}
         onContextMenu={(e) => openTaskMenu(e, t)}
         {...taskTouchContextMenu.bind(`week-task:${t.id}`, ({ x, y }) => openTaskMenuAt(x, y, t))}

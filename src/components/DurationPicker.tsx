@@ -10,7 +10,7 @@ function formatDurationKo(totalSeconds: number) {
   const s = Math.max(0, Math.floor(totalSeconds))
   const hours = Math.floor(s / 3600)
   const minutes = Math.floor((s % 3600) / 60)
-  if (hours <= 0 && minutes <= 0) return '시간 선택'
+  if (hours <= 0 && minutes <= 0) return '소요시간'
   if (hours > 0 && minutes > 0) return `${hours}시간 ${minutes}분`
   if (hours > 0) return `${hours}시간`
   return `${minutes}분`
@@ -57,6 +57,7 @@ export function DurationPickerButton({
   const dialogRef = useRef<HTMLDivElement | null>(null)
   const hourListRef = useRef<HTMLDivElement | null>(null)
   const minuteListRef = useRef<HTMLDivElement | null>(null)
+  const closeQueuedRef = useRef(false)
 
   useEffect(() => {
     if (!open) return
@@ -81,13 +82,21 @@ export function DurationPickerButton({
   }, [open, draftHour, draftMinute, maxHours, onChangeSeconds])
 
   const label = buttonLabel ?? formatDurationKo(valueSeconds)
+  const queueClose = () => {
+    if (closeQueuedRef.current) return
+    closeQueuedRef.current = true
+    window.setTimeout(() => {
+      closeQueuedRef.current = false
+      setOpen(false)
+    }, 0)
+  }
 
   return (
     <>
       <button
         type="button"
         className={buttonClassName}
-        aria-label={ariaLabel ?? '소요시간 선택'}
+        aria-label={ariaLabel ?? '소요시간'}
         onClick={() => setOpen(true)}
       >
         {label}
@@ -97,13 +106,27 @@ export function DurationPickerButton({
         ? createPortal(
             <div
               className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-900/35 px-4"
-              onMouseDown={(e) => {
+              onPointerDownCapture={(e) => {
+                if (e.target !== e.currentTarget) return
+                e.preventDefault()
                 e.stopPropagation()
-                if (e.target === e.currentTarget) setOpen(false)
+                queueClose()
               }}
-              onTouchStart={(e) => {
+              onMouseDownCapture={(e) => {
+                if (e.target !== e.currentTarget) return
+                e.preventDefault()
                 e.stopPropagation()
-                if (e.target === e.currentTarget) setOpen(false)
+              }}
+              onTouchStartCapture={(e) => {
+                if (e.target !== e.currentTarget) return
+                e.preventDefault()
+                e.stopPropagation()
+                queueClose()
+              }}
+              onClickCapture={(e) => {
+                if (e.target !== e.currentTarget) return
+                e.preventDefault()
+                e.stopPropagation()
               }}
             >
               <div
@@ -116,7 +139,7 @@ export function DurationPickerButton({
                 onTouchStart={(e) => e.stopPropagation()}
               >
                 <div className="flex items-center justify-between">
-                  <div className="text-base font-semibold text-slate-900">소요시간 선택</div>
+                  <div className="text-base font-semibold text-slate-900">소요시간</div>
                   <button
                     type="button"
                     onClick={() => setOpen(false)}

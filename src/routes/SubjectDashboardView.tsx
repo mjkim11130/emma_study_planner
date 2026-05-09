@@ -1513,7 +1513,7 @@ export function SubjectDashboardView() {
           </div>
         }
         footer={
-          <div className="sticky bottom-0 border-t border-slate-100 bg-white/95 px-5 py-4 backdrop-blur md:px-6">
+          <div className="safe-bottom-sheet-footer sticky bottom-0 border-t border-slate-100 bg-white px-5 pt-4 backdrop-blur md:px-6">
             <div className="grid grid-cols-2 gap-3">
               <button
                 type="button"

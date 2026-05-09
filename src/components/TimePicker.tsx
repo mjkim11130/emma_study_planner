@@ -68,6 +68,7 @@ export function TimePickerModal({
   const dialogRef = useRef<HTMLDivElement | null>(null)
   const hourListRef = useRef<HTMLDivElement | null>(null)
   const minuteListRef = useRef<HTMLDivElement | null>(null)
+  const closeQueuedRef = useRef(false)
 
   const [draftHour, setDraftHour] = useState(0)
   const [draftMinute, setDraftMinute] = useState(0)
@@ -96,18 +97,41 @@ export function TimePickerModal({
   const validationMessage = validate?.(hm) ?? null
   const invalid = Boolean(validationMessage)
 
+  const queueClose = () => {
+    if (closeQueuedRef.current) return
+    closeQueuedRef.current = true
+    window.setTimeout(() => {
+      closeQueuedRef.current = false
+      onClose()
+    }, 0)
+  }
+
   if (!open || typeof document === 'undefined') return null
 
   return createPortal(
     <div
       className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-900/35 px-4"
-      onMouseDown={(e) => {
+      onPointerDownCapture={(e) => {
+        if (e.target !== e.currentTarget) return
+        e.preventDefault()
         e.stopPropagation()
-        if (e.target === e.currentTarget) onClose()
+        queueClose()
       }}
-      onTouchStart={(e) => {
+      onMouseDownCapture={(e) => {
+        if (e.target !== e.currentTarget) return
+        e.preventDefault()
         e.stopPropagation()
-        if (e.target === e.currentTarget) onClose()
+      }}
+      onTouchStartCapture={(e) => {
+        if (e.target !== e.currentTarget) return
+        e.preventDefault()
+        e.stopPropagation()
+        queueClose()
+      }}
+      onClickCapture={(e) => {
+        if (e.target !== e.currentTarget) return
+        e.preventDefault()
+        e.stopPropagation()
       }}
     >
       <div

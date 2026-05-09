@@ -12,7 +12,7 @@ import { MobileTopBar } from '../components/MobileTopBar'
 import { IconCalendarMonth, IconCalendarWeek, IconPlus } from '../components/NavIcons'
 import { useTaskDialog } from '../components/TaskDialogContext'
 import { TimePickerModal } from '../components/TimePicker'
-import { getTaskDragId, setTaskDragData, syncTaskDropEffect } from '../lib/taskDrag'
+import { getTaskDragId, setTaskDragData, setTaskDragPreview, syncTaskDropEffect } from '../lib/taskDrag'
 import { buildClipboardTaskAtTime, copyTaskToClipboard, pasteTaskFromClipboard } from '../lib/taskClipboard'
 import { useTouchContextMenu } from '../lib/useTouchContextMenu'
 
@@ -1349,8 +1349,9 @@ export function DayDetailView() {
 	                                            {...taskTouchContextMenu.bind(`day-bubble:${t.id}`, ({ x, y }) => openDayTaskMenuAt(x, y, t.id))}
 	                                            draggable
 	                                            onDragStart={(e) => {
-                                              setTaskDragData(e.dataTransfer, t.id)
-                                            }}
+	                                              setTaskDragData(e.dataTransfer, t.id)
+	                                              setTaskDragPreview(e.dataTransfer, e.currentTarget, e.clientX, e.clientY)
+	                                            }}
                                             className={`w-[33vw] max-w-[190px] select-none rounded-xl border border-black/10 px-2.5 py-1.5 text-left text-[10px] shadow-sm ${onText} ${
                                               isCompleted ? 'saturate-[0.85] brightness-[0.97]' : ''
                                             }`}
@@ -1487,6 +1488,7 @@ function DayTimeline({
     startY: number
     started: boolean
     timeoutId: number | null
+    targetEl: HTMLElement | null
   } | null>(null)
   const dragScrollStopRef = useRef<{
     active: boolean
@@ -1531,7 +1533,8 @@ function DayTimeline({
     startY: number
     started: boolean
     startMin: number
-  }>({ timeoutId: null, pointerId: -1, startX: 0, startY: 0, started: false, startMin: 0 })
+    targetEl: HTMLElement | null
+  }>({ timeoutId: null, pointerId: -1, startX: 0, startY: 0, started: false, startMin: 0, targetEl: null })
 
   const startDragScrollStop = () => {
     if (typeof window === 'undefined') return
@@ -1643,6 +1646,10 @@ function DayTimeline({
     if (!pending) return
     if (pending.timeoutId != null) window.clearTimeout(pending.timeoutId)
     pendingRef.current = null
+    if (!active && !rangeSelect && !windowDrag) {
+      if (containerRef.current) containerRef.current.style.touchAction = ''
+      stopDragScrollStop()
+    }
     // pending drag canceled: release interaction lock if nothing else is active
     if (!active && !rangeSelect) setInteractionLocked(false)
   }
@@ -1689,8 +1696,15 @@ function DayTimeline({
       const pending = pendingRef.current
       if (!pending || pending.pointerId !== pointerId) return
       pending.started = true
+      if (containerRef.current) containerRef.current.style.touchAction = 'none'
+      startDragScrollStop()
+      try {
+        pending.targetEl?.setPointerCapture(pointerId)
+      } catch {
+        // ignore
+      }
     }, 260)
-    pendingRef.current = { pointerId, id, kind, mode, startX, startY, started: false, timeoutId }
+    pendingRef.current = { pointerId, id, kind, mode, startX, startY, started: false, timeoutId, targetEl: e.currentTarget as HTMLElement }
   }
 
   const handlePointerMove = (e: React.PointerEvent) => {
@@ -1718,7 +1732,7 @@ function DayTimeline({
       const dy = e.clientY - pendingRange.startY
       if (Math.hypot(dx, dy) > 8) {
         if (pendingRange.timeoutId) window.clearTimeout(pendingRange.timeoutId)
-        rangePressRef.current = { timeoutId: null, pointerId: -1, startX: 0, startY: 0, started: false, startMin: 0 }
+        rangePressRef.current = { timeoutId: null, pointerId: -1, startX: 0, startY: 0, started: false, startMin: 0, targetEl: null }
         if (!active) setInteractionLocked(false)
       }
     }
@@ -1728,6 +1742,7 @@ function DayTimeline({
       if (Math.hypot(dx, dy) <= 8) return
       if (!containerRef.current) return
       setRangeSelect({ pointerId: e.pointerId, startMin: pendingRange.startMin, endMin: pendingRange.startMin + 10, active: true })
+      rangePressRef.current = { timeoutId: null, pointerId: -1, startX: 0, startY: 0, started: false, startMin: 0, targetEl: null }
       containerRef.current.style.touchAction = 'none'
       try {
         containerRef.current.setPointerCapture(e.pointerId)
@@ -1821,11 +1836,11 @@ function DayTimeline({
     cancelPending()
     if (rangePressRef.current.timeoutId) {
       window.clearTimeout(rangePressRef.current.timeoutId)
-      rangePressRef.current = { timeoutId: null, pointerId: -1, startX: 0, startY: 0, started: false, startMin: 0 }
+      rangePressRef.current = { timeoutId: null, pointerId: -1, startX: 0, startY: 0, started: false, startMin: 0, targetEl: null }
     }
     if (e && rangePressRef.current.pointerId === e.pointerId && rangePressRef.current.started && !rangeSelect) {
       const pending = rangePressRef.current
-      rangePressRef.current = { timeoutId: null, pointerId: -1, startX: 0, startY: 0, started: false, startMin: 0 }
+      rangePressRef.current = { timeoutId: null, pointerId: -1, startX: 0, startY: 0, started: false, startMin: 0, targetEl: null }
       if (containerRef.current) containerRef.current.style.touchAction = ''
       stopDragScrollStop()
       setInteractionLocked(false)
@@ -1943,12 +1958,20 @@ function DayTimeline({
               if (pending.pointerId !== e.pointerId) return
               pending.started = true
               pending.timeoutId = null
+              if (containerRef.current) containerRef.current.style.touchAction = 'none'
+              startDragScrollStop()
+              try {
+                pending.targetEl?.setPointerCapture(e.pointerId)
+              } catch {
+                // ignore
+              }
             }, 320),
             pointerId: e.pointerId,
             startX: e.clientX,
             startY: e.clientY,
             started: false,
             startMin: at,
+            targetEl: e.currentTarget as HTMLElement,
           }
         }}
         onDragOver={(e) => {

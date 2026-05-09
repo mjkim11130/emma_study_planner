@@ -41,7 +41,7 @@ import { TaskDialogShell } from '../components/TaskDialogShell'
 import type { StudyTask } from '../store/types'
 import { buildTimeSummaryNode, formatDurationPreciseKo } from '../lib/taskTimeSummary'
 import { useEscapeKey } from '../lib/useEscapeKey'
-import { getTaskDragId, setTaskDragData, syncTaskDropEffect } from '../lib/taskDrag'
+import { getTaskDragId, setTaskDragData, setTaskDragPreview, syncTaskDropEffect } from '../lib/taskDrag'
 import { copyTaskToClipboard, getTaskClipboard, pasteTaskFromClipboard } from '../lib/taskClipboard'
 import { useTouchContextMenu } from '../lib/useTouchContextMenu'
 
@@ -66,6 +66,15 @@ function formatMeridiemHm(hm?: string) {
   const meridiem = hours24 < 12 ? '오전' : '오후'
   const hours12 = hours24 % 12 === 0 ? 12 : hours24 % 12
   return `${meridiem} ${String(hours12).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`
+}
+
+function formatEndMeridiemHm(startHm?: string | null, endHm?: string | null) {
+  if (!endHm) return null
+  const formatted = formatMeridiemHm(endHm) ?? endHm
+  const startMin = hmToMinutes(startHm ?? null)
+  const endMin = hmToMinutes(endHm ?? null)
+  if (startMin !== null && endMin !== null && endMin < startMin) return `익일 ${formatted}`
+  return formatted
 }
 
 function hmToMinutes(hm?: string | null) {
@@ -213,9 +222,10 @@ export function CalendarView() {
   >(null)
   const [plannedDurationPickerOpen, setPlannedDurationPickerOpen] = useState(false)
   const [plannedSecondsDraft, setPlannedSecondsDraft] = useState(0)
+  const [actualDurationPickerOpen, setActualDurationPickerOpen] = useState(false)
+  const [actualSecondsDraft, setActualSecondsDraft] = useState(0)
   const [editValidationMessage, setEditValidationMessage] = useState<string | null>(null)
   const [editExitConfirmOpen, setEditExitConfirmOpen] = useState(false)
-  const [editWarningMessage, setEditWarningMessage] = useState<string | null>(null)
   const [editTitleDraft, setEditTitleDraft] = useState('')
   const [editTitleSample, setEditTitleSample] = useState('제목 추가')
   const editTitleOriginalRef = useRef<{ taskId: string; title: string } | null>(null)
@@ -223,11 +233,7 @@ export function CalendarView() {
   const subjectPillRefs = useRef<Record<string, HTMLButtonElement | null>>({})
   const [startDock, setStartDock] = useState<{ v: 'top' | 'bottom'; h: 'right' }>({ v: 'bottom', h: 'right' })
   const topDockY = 64
-  const [, setSheetDragY] = useState(0)
-  const sheetDragRef = useRef<{ startY: number; isDragging: boolean }>({ startY: 0, isDragging: false })
-  const sheetDragYRef = useRef(0)
-  const [, setSheetIsDragging] = useState(false)
-  const [sheetClosing, setSheetClosing] = useState(false)
+	  const [sheetClosing, setSheetClosing] = useState(false)
   const [autoCloseAfterCompleteTaskId, setAutoCloseAfterCompleteTaskId] = useState<string | null>(null)
   const [flashTaskId, setFlashTaskId] = useState<string | null>(null)
   const scrollAnimRef = useRef<number | null>(null)
@@ -720,6 +726,21 @@ export function CalendarView() {
   useEffect(() => {
     if (!previewTask) return
     if (editTaskId !== previewTask.id) return
+    const start = hmToMinutes(previewTask.actualStartTime ?? null)
+    const end = hmToMinutes(previewTask.actualEndTime ?? null)
+    let nextSeconds = typeof previewTask.actualSeconds === 'number' ? previewTask.actualSeconds : 0
+    if (start !== null && end !== null && end !== start) {
+      nextSeconds = diffMinutesAllowNextDay(start, end).minutes * 60
+    }
+    setActualSecondsDraft(Math.max(0, nextSeconds))
+    if (previewTask.actualStartTime && previewTask.actualEndTime && previewTask.actualStartTime === previewTask.actualEndTime) {
+      patchPreviewTask({ actualEndTime: undefined, actualSeconds: undefined })
+    }
+  }, [previewTask?.id, editTaskId])
+
+  useEffect(() => {
+    if (!previewTask) return
+    if (editTaskId !== previewTask.id) return
     const currentTitle = previewTask.title ?? ''
     setEditTitleDraft(currentTitle)
     editTitleOriginalRef.current = { taskId: previewTask.id, title: currentTitle }
@@ -846,20 +867,10 @@ export function CalendarView() {
 
   const submitPreviewEdit = () => {
     if (!previewTask) return
-    setEditWarningMessage(null)
     const draft = editTitleDraft.trim()
     const original = (editTitleOriginalRef.current?.taskId === previewTask.id ? editTitleOriginalRef.current.title : previewTask.title ?? '').trim()
     const addFallbackTitle = buildNextTaskTitle((previewSubject?.name ?? '').trim(), tasks)
     const nextTitle = isAddMode ? draft || addFallbackTitle : draft || original || (previewSubject?.name ?? '').trim()
-    if (!previewTask.recordCompleteOnly) {
-      const start = hmToMinutes(previewTask.actualStartTime ?? null)
-      const end = hmToMinutes(previewTask.actualEndTime ?? null)
-      const hasOnlyOne = (start === null) !== (end === null)
-      if (hasOnlyOne) {
-        setEditValidationMessage('완료 시작시간과 종료시간을 모두 입력해야 저장할 수 있어요.')
-        return
-      }
-    }
     const start = hmToMinutes(previewTask.actualStartTime ?? null)
     const end = hmToMinutes(previewTask.actualEndTime ?? null)
     if (start !== null && end !== null) {
@@ -867,12 +878,11 @@ export function CalendarView() {
         setEditValidationMessage('완료 종료시간을 시작시간과 동일하게 설정할 수 없어요.')
         return
       }
-      const { minutes, wraps } = diffMinutesAllowNextDay(start, end)
+      const { minutes } = diffMinutesAllowNextDay(start, end)
       if (minutes > 10 * 60) {
         setEditValidationMessage('완료 시작/종료 간격이 10시간을 넘어서 저장할 수 없어요.')
         return
       }
-      if (wraps) setEditWarningMessage('종료시간이 시작시간보다 빨라서, 다음날까지 진행한 것으로 계산돼요.')
     }
     setEditValidationMessage(null)
     if (isAddMode) {
@@ -1324,6 +1334,7 @@ export function CalendarView() {
                         draggable
                         onDragStart={(e) => {
                           setTaskDragData(e.dataTransfer, t.id)
+                          setTaskDragPreview(e.dataTransfer, e.currentTarget, e.clientX, e.clientY)
                         }}
                         onDragEnd={() => setDragOverDate(null)}
                         onContextMenu={(e) => openMonthTaskMenu(e, t)}
@@ -1524,7 +1535,7 @@ export function CalendarView() {
 	              }
 	              const start = previewTask.recordCompleteOnly ? null : hmToMinutes(previewTask.actualStartTime ?? null)
 	              const end = previewTask.recordCompleteOnly ? null : hmToMinutes(previewTask.actualEndTime ?? null)
-	              const hasOnlyOne = !previewTask.recordCompleteOnly && ((start === null) !== (end === null))
+	              const hasOnlyOne = !previewTask.recordCompleteOnly && start === null && end !== null
 	              const invalidRange = !previewTask.recordCompleteOnly && start !== null && end !== null && end < start
 	              if (hasOnlyOne || invalidRange) {
 	                setEditExitConfirmOpen(true)
@@ -1535,53 +1546,6 @@ export function CalendarView() {
 	            titleRow={null}
 	            footer={null}
 	          >
-	              <div
-	                className="md:hidden px-5 pt-2"
-	                style={{ touchAction: 'none' }}
-	                onPointerDown={(e) => {
-	                  sheetDragRef.current = { startY: e.clientY, isDragging: true }
-	                  setSheetIsDragging(true)
-	                  sheetDragYRef.current = 0
-	                  setSheetDragY(0)
-	                  ;(e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId)
-	                }}
-	                onPointerMove={(e) => {
-	                  if (!sheetDragRef.current.isDragging) return
-	                  const dy = Math.max(0, e.clientY - sheetDragRef.current.startY)
-	                  sheetDragYRef.current = dy
-	                  setSheetDragY(dy)
-	                }}
-	                onPointerUp={(e) => {
-	                  if (!sheetDragRef.current.isDragging) return
-	                  sheetDragRef.current.isDragging = false
-	                  setSheetIsDragging(false)
-	                  const dy = sheetDragYRef.current
-	                  if (dy > 120) {
-	                    closePreviewTask()
-	                    return
-	                  }
-	                  sheetDragYRef.current = 0
-	                  setSheetDragY(0)
-	                  try {
-	                    ;(e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId)
-	                  } catch {
-	                    // ignore
-	                  }
-	                }}
-	                onPointerCancel={() => {
-	                  sheetDragRef.current.isDragging = false
-	                  setSheetIsDragging(false)
-	                  sheetDragYRef.current = 0
-	                  setSheetDragY(0)
-	                }}
-	              >
-	                <div
-	                  role="button"
-	                  tabIndex={0}
-	                  aria-label="드래그로 닫기"
-	                  className="mx-auto h-1.5 w-12 rounded-full bg-slate-300"
-	                />
-	              </div>
 	              <div className="px-5 py-5 md:px-6">
 	                {(() => {
 	                  const isEditing = editTaskId === previewTask.id
@@ -1690,14 +1654,20 @@ export function CalendarView() {
 	                    </>
 	                  )
 	                })()}
-	                {isEditingPreview ? (
-	                  <div className="mt-2 px-4">
-	                    <button
-	                      type="button"
-	                      onClick={() => openCalendarFor('date')}
-	                      className="inline-flex cursor-pointer items-center gap-2 text-base font-medium text-slate-500 underline decoration-slate-200 decoration-dotted underline-offset-4 transition hover:text-slate-700 hover:decoration-slate-400"
-	                      aria-label="날짜 선택"
-	                    >
+		                {isEditingPreview ? (
+		                  <div className="mt-3.5 px-4">
+		                    <button
+		                      type="button"
+		                      onClick={() => openCalendarFor('date')}
+		                      className="task-date-edit-trigger inline-flex cursor-pointer items-center gap-2 font-medium text-slate-500 underline decoration-slate-200 decoration-dotted underline-offset-4 transition hover:text-slate-700 hover:decoration-slate-400"
+		                      aria-label="날짜 선택"
+		                    >
+	                        <svg viewBox="0 -960 960 960" className="shrink-0" aria-hidden="true">
+	                          <path
+	                            d="M200-80q-33 0-56.5-23.5T120-160v-560q0-33 23.5-56.5T200-800h40v-80h80v80h320v-80h80v80h40q33 0 56.5 23.5T840-720v560q0 33-23.5 56.5T760-80H200Zm0-80h560v-400H200v400Z"
+	                            fill="currentColor"
+                          />
+                        </svg>
 	                      <span>{formatTaskPreviewDate(previewTask.date) ?? '날짜 선택'}</span>
 	                      {previewTask.date ? (
 	                        <span
@@ -1730,220 +1700,265 @@ export function CalendarView() {
 		                {hasPreviewMeta ? (
 		                  <div className="pt-2 md:col-span-2">
 		                    <div className="space-y-3">
-		                      {isEditingPreview ? (
-		                        <div className="space-y-3">
-		                          <div className="flex flex-nowrap items-center gap-2.5 text-base font-medium text-indigo-700">
-	                            <button
-	                              type="button"
-	                              onClick={() => openCalendarFor('dueDate')}
-	                              className="shrink-0 cursor-pointer rounded-full bg-indigo-50 px-3 py-1.5 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-100"
-	                              aria-label="디데이 선택"
-	                            >
-	                              {formatDday(previewTask.dueDate) || '마감'}
-	                            </button>
-		                            <button
-		                              type="button"
-		                              onClick={() => openCalendarFor('dueDate')}
-		                              className={`min-w-0 cursor-pointer whitespace-nowrap text-left tracking-[-0.02em] underline decoration-dotted underline-offset-4 transition md:tracking-[-0.03em] ${
-		                                previewTask.dueDate
-		                                  ? 'text-indigo-700 decoration-indigo-200 hover:decoration-indigo-400'
-		                                  : 'text-slate-400 decoration-slate-200 hover:decoration-slate-300'
-		                              }`}
-		                              aria-label="마감 날짜 선택"
-		                            >
-		                              {previewTask.dueDate ? formatDueDateLabel(previewTask.dueDate) : '마감 날짜 선택'}
-		                            </button>
-		                            {previewTask.dueDate ? (
-		                              <button
-		                                type="button"
-		                                onClick={() => patchPreviewTask({ dueDate: undefined })}
-		                                className="shrink-0 cursor-pointer text-base font-semibold text-slate-400 transition hover:text-slate-600"
-		                                aria-label="디데이 삭제"
-		                              >
-		                                ×
-		                              </button>
-		                            ) : null}
-		                          </div>
-
-		                          {editValidationMessage ? (
-		                            <div className="text-sm font-semibold text-rose-700">{editValidationMessage}</div>
-		                          ) : null}
-		                          {editWarningMessage ? (
-		                            <div className="text-sm font-semibold text-amber-700">{editWarningMessage}</div>
-		                          ) : null}
-
-			                          <div className="flex min-w-0 flex-nowrap items-center gap-2 text-base font-medium text-slate-700">
-			                            <span className="shrink-0 whitespace-nowrap rounded-full bg-slate-100 px-3 py-1.5 text-sm font-semibold text-slate-500">
-			                              계획
-			                            </span>
+			                      {isEditingPreview ? (
+			                        <div className="space-y-3">
+			                          <div className="flex flex-nowrap items-center gap-2.5 text-base font-medium text-indigo-700">
 			                            <button
 			                              type="button"
-			                              onClick={() => {
-			                                setTimePickerField('plannedStartTime')
-			                                setTimePickerOpen(true)
-			                              }}
-			                              className={`min-w-0 cursor-pointer truncate whitespace-nowrap text-left tracking-[-0.02em] underline decoration-dotted underline-offset-4 transition md:tracking-[-0.04em] ${
-			                                previewTask.plannedStartTime
-			                                  ? 'text-slate-700 decoration-slate-200 hover:decoration-slate-400'
+			                              onClick={() => openCalendarFor('dueDate')}
+			                              className="shrink-0 cursor-pointer rounded-full bg-indigo-50 px-3 py-1.5 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-100"
+			                              aria-label="디데이 선택"
+			                            >
+			                              {formatDday(previewTask.dueDate) || '마감'}
+			                            </button>
+			                            <button
+			                              type="button"
+			                              onClick={() => openCalendarFor('dueDate')}
+			                              className={`min-w-0 cursor-pointer whitespace-nowrap text-left tracking-[-0.02em] underline decoration-dotted underline-offset-4 transition md:tracking-[-0.03em] ${
+			                                previewTask.dueDate
+			                                  ? 'text-indigo-700 decoration-indigo-200 hover:decoration-indigo-400'
 			                                  : 'text-slate-400 decoration-slate-200 hover:decoration-slate-300'
 			                              }`}
-			                              aria-label="시작시간 입력"
+			                              aria-label="마감 날짜 선택"
 			                            >
-			                              {previewTask.plannedStartTime
-			                                ? formatMeridiemHm(previewTask.plannedStartTime) ?? previewTask.plannedStartTime
-			                                : '시작시간'}
+			                              {previewTask.dueDate ? formatDueDateLabel(previewTask.dueDate) : '마감 날짜 선택'}
 			                            </button>
-			                            {previewTask.plannedStartTime ? (
+			                            {previewTask.dueDate ? (
 			                              <button
 			                                type="button"
-			                                onClick={() => patchPreviewTask({ plannedStartTime: undefined })}
+			                                onClick={() => patchPreviewTask({ dueDate: undefined })}
 			                                className="shrink-0 cursor-pointer text-base font-semibold text-slate-400 transition hover:text-slate-600"
-			                                aria-label="계획 시작시간 삭제"
+			                                aria-label="디데이 삭제"
 			                              >
 			                                ×
 			                              </button>
 			                            ) : null}
-			                            <span className="shrink-0 px-1 text-slate-400">-</span>
-			                            <DurationPickerButton
-			                              valueSeconds={plannedSecondsDraft}
-			                              onChangeSeconds={(nextSeconds) => setPlannedSecondsDraft(nextSeconds)}
-			                              maxHours={10}
-			                              buttonLabel={plannedSecondsDraft > 0 ? formatDurationPreciseKo(plannedSecondsDraft) : '소요시간'}
-			                              buttonClassName={`min-w-0 cursor-pointer truncate whitespace-nowrap text-left text-base font-medium tracking-[-0.02em] underline decoration-dotted underline-offset-4 transition md:tracking-[-0.04em] ${
-			                                plannedSecondsDraft > 0
-			                                  ? 'text-slate-700 decoration-slate-200 hover:decoration-slate-400'
-			                                  : 'text-slate-400 decoration-slate-200 hover:decoration-slate-300'
-			                              }`}
-			                              ariaLabel="소요시간 입력"
-			                              open={plannedDurationPickerOpen}
-			                              onOpenChange={(next) => {
-			                                setPlannedDurationPickerOpen(next)
-			                                if (!next) patchPreviewTask({ plannedSeconds: plannedSecondsDraft })
-			                              }}
-			                            />
-			                            {plannedSecondsDraft > 0 ? (
-			                              <button
-			                                type="button"
-			                                onClick={() => {
-			                                  setPlannedSecondsDraft(0)
-			                                  patchPreviewTask({ plannedSeconds: 0 })
-			                                }}
-			                                className="shrink-0 cursor-pointer text-base font-semibold text-slate-400 transition hover:text-slate-600"
-			                                aria-label="계획 소요시간 삭제"
-			                              >
-			                                ×
-			                              </button>
-			                            ) : null}
-			                            <span className="shrink-0 px-1 text-slate-400">-</span>
-			                            <button
-			                              type="button"
-			                              onClick={() => {
-			                                setTimePickerField('plannedEndTime')
-			                                setTimePickerOpen(true)
-			                              }}
-			                              className={`min-w-0 cursor-pointer truncate whitespace-nowrap text-left tracking-[-0.02em] underline decoration-dotted underline-offset-4 transition md:tracking-[-0.04em] ${
-			                                previewTask.plannedStartTime && plannedSecondsDraft > 0
-			                                  ? 'text-slate-700 decoration-slate-200 hover:decoration-slate-400'
-			                                  : 'text-slate-400 decoration-slate-200 hover:decoration-slate-300'
-			                              }`}
-			                              aria-label="종료시간 입력"
-			                            >
-			                              {previewTask.plannedStartTime && plannedSecondsDraft > 0
-			                                ? formatMeridiemHm(addSecondsToHm(previewTask.plannedStartTime, plannedSecondsDraft) ?? '') ??
-			                                  addSecondsToHm(previewTask.plannedStartTime, plannedSecondsDraft) ??
-			                                  '종료시간'
-			                                : '종료시간'}
-			                            </button>
 			                          </div>
 
-		                          <div className="flex flex-col gap-2 md:flex-row md:items-center">
-		                            <div className="flex min-w-0 flex-nowrap items-center gap-3 text-base font-medium text-slate-700 md:flex-1">
-                              <span className="shrink-0 whitespace-nowrap rounded-full bg-black/80 px-3 py-1.5 text-sm font-semibold text-white">
-		                                완료
-		                              </span>
-		                              {previewTask.recordCompleteOnly ? (
-		                                <span className="min-w-0 truncate whitespace-nowrap tracking-[-0.02em] text-slate-700 md:tracking-[-0.04em]">
-		                                  완료 처리
-		                                </span>
-		                              ) : (
-		                                <>
-		                                  <button
-		                                    type="button"
-		                                    onClick={() => {
-		                                      setTimePickerField('actualStartTime')
-		                                      setTimePickerOpen(true)
-		                                    }}
-		                                    className={`min-w-0 truncate whitespace-nowrap text-left tracking-[-0.02em] underline decoration-dotted underline-offset-4 transition md:tracking-[-0.04em] cursor-pointer ${
-		                                      previewTask.actualStartTime
-		                                        ? 'text-slate-700 decoration-slate-200 hover:decoration-slate-400'
-		                                        : 'text-slate-400 decoration-slate-200 hover:decoration-slate-300'
-		                                    }`}
-		                                    aria-label="시작시간 입력"
-		                                  >
-		                                    {previewTask.actualStartTime
-		                                      ? `${formatMeridiemHm(previewTask.actualStartTime) ?? previewTask.actualStartTime}부터`
-		                                      : '시작시간 입력'}
-		                                  </button>
-		                                  <span className="shrink-0 px-1.5 text-slate-400">·</span>
-		                                  <button
-		                                    type="button"
-		                                    onClick={() => {
-		                                      setTimePickerField('actualEndTime')
-		                                      setTimePickerOpen(true)
-		                                    }}
-		                                    className={`min-w-0 truncate whitespace-nowrap text-left tracking-[-0.02em] underline decoration-dotted underline-offset-4 transition md:tracking-[-0.04em] cursor-pointer ${
-		                                      previewTask.actualEndTime
-		                                        ? 'text-slate-700 decoration-slate-200 hover:decoration-slate-400'
-		                                        : 'text-slate-400 decoration-slate-200 hover:decoration-slate-300'
-		                                    }`}
-		                                    aria-label="종료시간 입력"
-		                                  >
-		                                    {previewTask.actualEndTime
-		                                      ? `${formatMeridiemHm(previewTask.actualEndTime) ?? previewTask.actualEndTime}까지`
-		                                      : '종료시간 입력'}
-		                                  </button>
-		                                  {previewTask.actualStartTime || previewTask.actualEndTime ? (
-		                                    <button
-		                                      type="button"
-                                      onClick={() => {
-                                        patchPreviewTask({
-                                          actualStartTime: undefined,
-                                          actualEndTime: undefined,
-                                          actualSeconds: undefined,
-                                          status: 'pending',
-                                        })
-                                      }}
-		                                      className="shrink-0 cursor-pointer text-base font-semibold text-slate-400 transition hover:text-slate-600"
-		                                      aria-label="완료 삭제"
-		                                    >
-		                                      ×
-		                                    </button>
-		                                  ) : null}
-		                                </>
-		                              )}
-		                            </div>
+			                          {editValidationMessage ? <div className="text-sm font-semibold text-rose-700">{editValidationMessage}</div> : null}
 
-		                            <label className="flex w-fit cursor-pointer items-center gap-2 self-end text-sm font-semibold text-slate-600 md:ml-auto md:self-auto">
-		                            <input
-		                              type="checkbox"
-		                              checked={Boolean(previewTask.recordCompleteOnly)}
-		                              onChange={(e) => {
-		                                const checked = e.target.checked
-		                                patchPreviewTask({
-		                                  recordCompleteOnly: checked,
-		                                  status: checked ? 'completed' : 'pending',
-		                                  actualStartTime: undefined,
-		                                  actualEndTime: undefined,
-		                                  actualSeconds: undefined,
-		                                })
-		                              }}
-		                              className="h-4 w-4 rounded border-slate-300"
-		                            />
-		                            완료 처리
-		                          </label>
-		                          </div>
-		                        </div>
-	                      ) : (
+			                          <div className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 gap-y-2">
+			                            <span className="shrink-0 whitespace-nowrap rounded-full bg-slate-100 px-3 py-1.5 text-sm font-semibold text-slate-500">계획</span>
+			                            <div className="min-w-0 text-base font-medium text-slate-700">
+			                              <div className="flex min-w-0 items-center gap-3">
+			                                <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
+			                                  <button
+			                                    type="button"
+			                                    onClick={() => {
+			                                      setTimePickerField('plannedStartTime')
+			                                      setTimePickerOpen(true)
+			                                    }}
+			                                    className={`min-w-0 cursor-pointer truncate whitespace-nowrap text-left tracking-[-0.02em] underline decoration-dotted underline-offset-4 transition md:tracking-[-0.04em] ${
+			                                      previewTask.plannedStartTime
+			                                        ? 'task-time-edit-filled task-time-edit-text text-slate-700 decoration-slate-200 hover:decoration-slate-400'
+			                                        : 'text-slate-400 decoration-slate-200 hover:decoration-slate-300'
+			                                    }`}
+			                                    aria-label="시작시간"
+			                                  >
+			                                    {previewTask.plannedStartTime ? formatMeridiemHm(previewTask.plannedStartTime) ?? previewTask.plannedStartTime : '시작시간'}
+			                                  </button>
+			                                  <span className="shrink-0 text-slate-300">-</span>
+			                                  <button
+			                                    type="button"
+			                                    onClick={() => {
+			                                      if (!previewTask.plannedStartTime) return
+			                                      setTimePickerField('plannedEndTime')
+			                                      setTimePickerOpen(true)
+			                                    }}
+			                                    className={`min-w-0 cursor-pointer truncate whitespace-nowrap text-left tracking-[-0.02em] underline decoration-dotted underline-offset-4 transition md:tracking-[-0.04em] ${
+			                                      previewTask.plannedStartTime && plannedSecondsDraft > 0
+			                                        ? 'task-time-edit-filled task-time-edit-text text-slate-700 decoration-slate-200 hover:decoration-slate-400'
+			                                        : 'text-slate-400 decoration-slate-200 hover:decoration-slate-300'
+			                                    } ${previewTask.plannedStartTime ? '' : 'pointer-events-none'}`}
+			                                    aria-label="종료시간"
+			                                  >
+			                                    {previewTask.plannedStartTime && plannedSecondsDraft > 0
+			                                      ? formatEndMeridiemHm(
+			                                          previewTask.plannedStartTime,
+			                                          addSecondsToHm(previewTask.plannedStartTime, plannedSecondsDraft) ?? '',
+			                                        ) ??
+			                                        addSecondsToHm(previewTask.plannedStartTime, plannedSecondsDraft) ??
+			                                        '종료시간'
+			                                      : '종료시간'}
+			                                  </button>
+			                                </div>
+			                                <div className="flex shrink-0 items-center justify-end gap-2.5">
+			                                  <DurationPickerButton
+			                                    valueSeconds={plannedSecondsDraft}
+			                                    onChangeSeconds={(nextSeconds) => setPlannedSecondsDraft(nextSeconds)}
+			                                    maxHours={10}
+			                                    buttonLabel={plannedSecondsDraft > 0 ? formatDurationPreciseKo(plannedSecondsDraft) : '소요시간'}
+			                                    buttonClassName={`min-w-0 cursor-pointer truncate whitespace-nowrap text-right font-medium tracking-[-0.02em] underline decoration-dotted underline-offset-4 transition md:tracking-[-0.04em] ${
+			                                      plannedSecondsDraft > 0
+			                                        ? 'task-time-edit-filled task-time-edit-text text-slate-700 decoration-slate-200 hover:decoration-slate-400'
+			                                        : 'text-slate-400 decoration-slate-200 hover:decoration-slate-300'
+			                                    }`}
+			                                    ariaLabel="소요시간"
+			                                    open={plannedDurationPickerOpen}
+			                                    onOpenChange={(next) => {
+			                                      setPlannedDurationPickerOpen(next)
+			                                      if (!next) patchPreviewTask({ plannedSeconds: plannedSecondsDraft })
+			                                    }}
+			                                  />
+			                                  {previewTask.plannedStartTime || plannedSecondsDraft > 0 ? (
+			                                    <button
+			                                      type="button"
+			                                      onClick={() => {
+			                                        setPlannedSecondsDraft(0)
+			                                        patchPreviewTask({ plannedStartTime: undefined, plannedSeconds: 0 })
+			                                      }}
+			                                      className="shrink-0 cursor-pointer text-base font-semibold text-slate-400 transition hover:text-slate-600"
+			                                      aria-label="계획 시간 삭제"
+			                                    >
+			                                      ×
+			                                    </button>
+			                                  ) : null}
+			                                </div>
+			                              </div>
+			                            </div>
+			                          </div>
+
+			                          <div className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 gap-y-2">
+			                            <span className="shrink-0 whitespace-nowrap rounded-full bg-black/80 px-3 py-1.5 text-sm font-semibold text-white">완료</span>
+			                            <div className="min-w-0 text-base font-medium text-slate-700">
+			                              <div className="flex min-w-0 items-center gap-3">
+			                                <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
+			                                  <button
+			                                    type="button"
+			                                    onClick={() => {
+			                                      setTimePickerField('actualStartTime')
+			                                      setTimePickerOpen(true)
+			                                    }}
+			                                    className={`min-w-0 cursor-pointer truncate whitespace-nowrap text-left tracking-[-0.02em] underline decoration-dotted underline-offset-4 transition md:tracking-[-0.04em] ${
+			                                      previewTask.actualStartTime
+			                                        ? 'task-time-edit-filled task-time-edit-text text-slate-700 decoration-slate-200 hover:decoration-slate-400'
+			                                        : 'text-slate-400 decoration-slate-200 hover:decoration-slate-300'
+			                                    }`}
+			                                    aria-label="시작시간"
+			                                  >
+			                                    {previewTask.actualStartTime ? formatMeridiemHm(previewTask.actualStartTime) ?? previewTask.actualStartTime : '시작시간'}
+			                                  </button>
+			                                  <span className="shrink-0 text-slate-300">-</span>
+			                                  <button
+			                                    type="button"
+			                                    onClick={() => {
+			                                      setTimePickerField('actualEndTime')
+			                                      setTimePickerOpen(true)
+			                                    }}
+			                                    className={`min-w-0 cursor-pointer truncate whitespace-nowrap text-left tracking-[-0.02em] underline decoration-dotted underline-offset-4 transition md:tracking-[-0.04em] ${
+			                                      previewTask.actualEndTime
+			                                        ? 'task-time-edit-filled task-time-edit-text text-slate-700 decoration-slate-200 hover:decoration-slate-400'
+			                                        : 'text-slate-400 decoration-slate-200 hover:decoration-slate-300'
+			                                    }`}
+			                                    aria-label="종료시간"
+			                                  >
+			                                    {previewTask.actualEndTime
+			                                      ? formatEndMeridiemHm(previewTask.actualStartTime, previewTask.actualEndTime) ?? previewTask.actualEndTime
+			                                      : '종료시간'}
+			                                  </button>
+			                                </div>
+			                                <div className="flex shrink-0 items-center justify-end gap-2.5">
+			                                  <DurationPickerButton
+			                                    valueSeconds={actualSecondsDraft}
+			                                    onChangeSeconds={(nextSeconds) => setActualSecondsDraft(nextSeconds)}
+			                                    maxHours={10}
+			                                    buttonLabel={actualSecondsDraft > 0 ? formatDurationPreciseKo(actualSecondsDraft) : '소요시간'}
+			                                    buttonClassName={`min-w-0 cursor-pointer truncate whitespace-nowrap text-right font-medium tracking-[-0.02em] underline decoration-dotted underline-offset-4 transition md:tracking-[-0.04em] ${
+			                                      actualSecondsDraft > 0
+			                                        ? 'task-time-edit-filled task-time-edit-text text-slate-700 decoration-slate-200 hover:decoration-slate-400'
+			                                        : 'text-slate-400 decoration-slate-200 hover:decoration-slate-300'
+			                                    }`}
+			                                    ariaLabel="소요시간"
+			                                    open={actualDurationPickerOpen}
+			                                    onOpenChange={(next) => {
+			                                      setActualDurationPickerOpen(next)
+			                                      if (next) return
+			                                      if (!previewTask.actualStartTime) {
+			                                        patchPreviewTask({
+			                                          actualSeconds: actualSecondsDraft > 0 ? actualSecondsDraft : undefined,
+			                                          actualEndTime: undefined,
+			                                          status: actualSecondsDraft > 0 ? 'completed' : 'pending',
+			                                          recordCompleteOnly: false,
+			                                        })
+			                                        return
+			                                      }
+			                                      const end = actualSecondsDraft > 0 ? addSecondsToHm(previewTask.actualStartTime, actualSecondsDraft) : null
+			                                      patchPreviewTask({
+			                                        actualSeconds: actualSecondsDraft > 0 ? actualSecondsDraft : undefined,
+			                                        actualEndTime: end ?? undefined,
+			                                        status: 'completed',
+			                                        recordCompleteOnly: false,
+			                                      })
+			                                    }}
+			                                  />
+			                                  {previewTask.actualStartTime || previewTask.actualEndTime || actualSecondsDraft > 0 || typeof previewTask.actualSeconds === 'number' ? (
+			                                    <button
+			                                      type="button"
+			                                      onClick={() => {
+			                                        patchPreviewTask({
+			                                          actualStartTime: undefined,
+			                                          actualEndTime: undefined,
+			                                          actualSeconds: undefined,
+			                                          recordCompleteOnly: false,
+			                                          status: 'pending',
+			                                        })
+			                                        setActualSecondsDraft(0)
+			                                      }}
+			                                      className="shrink-0 cursor-pointer text-base font-semibold text-slate-400 transition hover:text-slate-600"
+			                                      aria-label="완료 시간 삭제"
+			                                    >
+			                                      ×
+			                                    </button>
+			                                  ) : null}
+			                                </div>
+			                              </div>
+			                              <label className="mt-2 ml-auto flex w-fit cursor-pointer items-center gap-2 pt-1 text-sm font-semibold text-slate-600">
+			                                <input
+			                                  type="checkbox"
+			                                  checked={Boolean(
+			                                    previewTask.status === 'completed' ||
+			                                      previewTask.recordCompleteOnly ||
+			                                      previewTask.actualStartTime ||
+			                                      previewTask.actualEndTime ||
+			                                      typeof previewTask.actualSeconds === 'number',
+			                                  )}
+			                                  onChange={(e) => {
+			                                    const checked = e.target.checked
+			                                    const hasRecordedTime =
+			                                      Boolean(previewTask.actualStartTime && previewTask.actualEndTime) || typeof previewTask.actualSeconds === 'number'
+			                                    if (checked) {
+			                                      if (hasRecordedTime) {
+			                                        patchPreviewTask({ status: 'completed', recordCompleteOnly: false })
+			                                        return
+			                                      }
+			                                      const plannedStart = previewTask.plannedStartTime
+			                                      const plannedSeconds = previewTask.plannedSeconds ?? 0
+			                                      const plannedEnd = plannedStart && plannedSeconds > 0 ? addSecondsToHm(plannedStart, plannedSeconds) : null
+			                                      patchPreviewTask({
+			                                        status: 'completed',
+			                                        recordCompleteOnly: true,
+			                                        actualStartTime: plannedStart && plannedEnd ? plannedStart : undefined,
+			                                        actualEndTime: plannedStart && plannedEnd ? plannedEnd : undefined,
+			                                        actualSeconds: undefined,
+			                                      })
+			                                      return
+			                                    }
+			                                    patchPreviewTask({
+			                                      recordCompleteOnly: false,
+			                                      status: 'pending',
+			                                      actualStartTime: undefined,
+			                                      actualEndTime: undefined,
+			                                      actualSeconds: undefined,
+			                                    })
+			                                  }}
+			                                  className="h-4 w-4 rounded border-slate-300"
+			                                />
+			                                완료 처리
+			                              </label>
+			                            </div>
+			                          </div>
+			                        </div>
+			                      ) : (
 	                        <>
 	                          {previewTask.dueDate ? (
 	                            <div className="flex flex-nowrap items-center gap-2.5 text-base font-medium text-indigo-700">
@@ -2007,20 +2022,7 @@ export function CalendarView() {
 	              </div>
 
 	              {isEditingPreview ? (
-	                <div className="sticky bottom-0 border-t border-slate-100 bg-white/95 px-5 py-4 backdrop-blur md:px-6">
-	                  {(() => {
-	                    if (!previewTask) return null
-	                    if (previewTask.recordCompleteOnly) return null
-	                    const s = hmToMinutes(previewTask.actualStartTime ?? null)
-	                    const e = hmToMinutes(previewTask.actualEndTime ?? null)
-	                    const hasOnlyOne = (s === null) !== (e === null)
-	                    if (!hasOnlyOne) return null
-	                    return (
-	                      <div className="mb-3 rounded-xl bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800">
-	                        완료 시작시간과 종료시간을 모두 입력해야 완료할 수 있어요.
-	                      </div>
-	                    )
-	                  })()}
+	                <div className="safe-bottom-sheet-footer sticky bottom-0 border-t border-slate-100 bg-white px-5 pt-4 backdrop-blur md:px-6">
 	                  <div className="grid grid-cols-2 gap-3">
 	                  <button
 	                    type="button"
@@ -2030,8 +2032,6 @@ export function CalendarView() {
 	                      if (previewTask.recordCompleteOnly) return false
 	                      const start = hmToMinutes(previewTask.actualStartTime ?? null)
 	                      const end = hmToMinutes(previewTask.actualEndTime ?? null)
-	                      const hasOnlyOne = (start === null) !== (end === null)
-	                      if (hasOnlyOne) return true
 	                      if (start === null || end === null) return false
 	                      if (end === start) return true
 	                      const { minutes } = diffMinutesAllowNextDay(start, end)
@@ -2051,7 +2051,7 @@ export function CalendarView() {
 	                      }
 	                      const start = previewTask.recordCompleteOnly ? null : hmToMinutes(previewTask.actualStartTime ?? null)
 	                      const end = previewTask.recordCompleteOnly ? null : hmToMinutes(previewTask.actualEndTime ?? null)
-	                      const hasOnlyOne = !previewTask.recordCompleteOnly && ((start === null) !== (end === null))
+	                      const hasOnlyOne = !previewTask.recordCompleteOnly && start === null && end !== null
 	                      const invalidRange =
 	                        !previewTask.recordCompleteOnly &&
 	                        start !== null &&
@@ -2064,7 +2064,6 @@ export function CalendarView() {
 	                      setEditTaskId(null)
 	                      setEditDraft(null)
 	                      setEditValidationMessage(null)
-	                      setEditWarningMessage(null)
 	                    }}
 	                    className="inline-flex h-10 w-full items-center justify-center rounded-xl bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-200"
 	                  >
@@ -2074,7 +2073,7 @@ export function CalendarView() {
 	                </div>
 	              ) : null}
 	              {!isEditingPreview ? (
-	                <div className="sticky bottom-0 border-t border-slate-100 bg-white/95 px-5 py-4 backdrop-blur md:px-6">
+	                <div className="safe-bottom-sheet-footer sticky bottom-0 border-t border-slate-100 bg-white px-5 pt-4 backdrop-blur md:px-6">
 	                  <div className="grid grid-cols-3 gap-2">
 	                    <button
 	                      type="button"
@@ -2116,13 +2115,27 @@ export function CalendarView() {
 		        {isEditingPreview && datePickerField ? (
 		              <div
 		                className="fixed inset-0 z-[75] flex items-center justify-center bg-slate-900/35 px-4"
-		                onMouseDown={(e) => {
+		                onPointerDownCapture={(e) => {
+		                  if (e.target !== e.currentTarget) return
+		                  e.preventDefault()
 		                  e.stopPropagation()
-		                  if (e.target === e.currentTarget) setDatePickerField(null)
+		                  window.setTimeout(() => setDatePickerField(null), 0)
 		                }}
-		                onTouchStart={(e) => {
+		                onMouseDownCapture={(e) => {
+		                  if (e.target !== e.currentTarget) return
+		                  e.preventDefault()
 		                  e.stopPropagation()
-		                  if (e.target === e.currentTarget) setDatePickerField(null)
+		                }}
+		                onTouchStartCapture={(e) => {
+		                  if (e.target !== e.currentTarget) return
+		                  e.preventDefault()
+		                  e.stopPropagation()
+		                  window.setTimeout(() => setDatePickerField(null), 0)
+		                }}
+		                onClickCapture={(e) => {
+		                  if (e.target !== e.currentTarget) return
+		                  e.preventDefault()
+		                  e.stopPropagation()
 		                }}
 		              >
 		                <div className="w-full max-w-sm rounded-2xl bg-white p-4 shadow-2xl">
@@ -2235,7 +2248,6 @@ export function CalendarView() {
 		                }
 		                onApply={(hm) => {
 		                  if (!previewTask) return
-		                  setEditWarningMessage(null)
 		                  if (timePickerField === 'actualStartTime') {
 		                    patchPreviewTask({
 		                      actualStartTime: hm,
@@ -2249,9 +2261,8 @@ export function CalendarView() {
 		                    if (endMin === null) return
 		                    if (startMin !== null) {
 		                      if (endMin === startMin) return
-		                      const { minutes, wraps } = diffMinutesAllowNextDay(startMin, endMin)
+		                      const { minutes } = diffMinutesAllowNextDay(startMin, endMin)
 		                      if (minutes > 10 * 60) return
-		                      if (wraps) setEditWarningMessage('종료시간이 시작시간보다 빨라서, 다음날까지 진행한 것으로 계산돼요.')
 		                      patchPreviewTask({
 		                        actualEndTime: hm,
 		                        actualSeconds: minutes > 0 ? minutes * 60 : undefined,
@@ -2275,9 +2286,8 @@ export function CalendarView() {
 		                      return
 		                    }
 		                    if (endMin === startMin) return
-		                    const { minutes, wraps } = diffMinutesAllowNextDay(startMin, endMin)
+		                    const { minutes } = diffMinutesAllowNextDay(startMin, endMin)
 		                    if (minutes > 10 * 60) return
-		                    if (wraps) setEditWarningMessage('종료시간이 시작시간보다 빨라서, 다음날까지 진행한 것으로 계산돼요.')
 		                    const nextSeconds = Math.max(0, minutes * 60)
 		                    setPlannedSecondsDraft(nextSeconds)
 		                    patchPreviewTask({ plannedSeconds: nextSeconds })
@@ -2525,6 +2535,7 @@ export function CalendarView() {
                                       draggable
                                       onDragStart={(e) => {
                                         setTaskDragData(e.dataTransfer, t.id)
+                                        setTaskDragPreview(e.dataTransfer, e.currentTarget, e.clientX, e.clientY)
                                       }}
                                       onDragEnd={() => setDragOverDate(null)}
                                       onContextMenu={(e) => openMonthTaskMenu(e, t)}

@@ -1,9 +1,49 @@
 @import "tailwindcss";
 
+:root {
+  --ios-bottom-swipe-gap: 8px;
+}
+
 html,
 body,
 #root {
   height: 100%;
+}
+
+.safe-bottom-sheet-footer {
+  padding-bottom: calc(env(safe-area-inset-bottom) + var(--ios-bottom-swipe-gap) + 12px);
+}
+
+.task-date-edit-trigger {
+  font-size: 17.1px;
+  line-height: 1.2;
+}
+
+.task-date-edit-trigger svg {
+  height: 1.1em;
+  width: 1.1em;
+}
+
+.task-time-edit-text {
+  font-size: 13.75px;
+  line-height: 1.2;
+}
+
+.task-time-edit-filled {
+  border-radius: 8px;
+  background: rgb(241 245 249);
+  padding: 4px 8px;
+}
+
+@media (min-width: 768px) {
+  .safe-bottom-sheet-footer {
+    padding-bottom: 16px;
+  }
+
+  .task-date-edit-trigger {
+    font-size: 14.4px;
+    line-height: 1.5;
+  }
 }
 
 body {

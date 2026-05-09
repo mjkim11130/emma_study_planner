@@ -62,6 +62,15 @@ function formatMeridiemHm(hm?: string) {
   return `${meridiem} ${String(hours12).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`
 }
 
+function formatEndMeridiemHm(startHm?: string | null, endHm?: string | null) {
+  if (!endHm) return null
+  const formatted = formatMeridiemHm(endHm) ?? endHm
+  const startMin = hmToMinutes(startHm ?? null)
+  const endMin = hmToMinutes(endHm ?? null)
+  if (startMin !== null && endMin !== null && endMin < startMin) return `익일 ${formatted}`
+  return formatted
+}
+
 function formatTaskPreviewDate(ymd?: string) {
   if (!ymd) return null
   return format(parseISO(ymd), 'yyyy년 M월 d일 eeee', { locale: ko })
@@ -196,7 +205,7 @@ export function TaskDialog() {
   const [editTitleSample, setEditTitleSample] = useState('제목 추가')
   const editTitleOriginalRef = useRef<{ taskId: string; title: string } | null>(null)
   const [editValidationMessage, setEditValidationMessage] = useState<string | null>(null)
-  const [editWarningMessage, setEditWarningMessage] = useState<string | null>(null)
+  const handledRequestRef = useRef<object | null>(null)
 
   const [datePickerField, setDatePickerField] = useState<null | 'date' | 'dueDate'>(null)
   const [calendarMonth, setCalendarMonth] = useState(() => new Date())
@@ -218,7 +227,15 @@ export function TaskDialog() {
 
   const basePreviewTask = addDraft ?? storedPreviewTask
   const isAddMode = addDraft?.id === DRAFT_TASK_ID
-  const isEditingPreview = Boolean(basePreviewTask && editTaskId === basePreviewTask.id)
+  const isFreshAutoEditRequest = Boolean(
+    request &&
+      request.mode === 'preview' &&
+      request.autoEdit &&
+      handledRequestRef.current !== request &&
+      basePreviewTask &&
+      request.taskId === basePreviewTask.id,
+  )
+  const isEditingPreview = Boolean(basePreviewTask && (editTaskId === basePreviewTask.id || isFreshAutoEditRequest))
   const previewTask = isAddMode ? addDraft : isEditingPreview ? editDraft ?? basePreviewTask : basePreviewTask
 
   const previewSubject = useMemo(
@@ -255,7 +272,10 @@ export function TaskDialog() {
   }
 
   useEffect(() => {
-    if (!request) return
+    if (!request) {
+      handledRequestRef.current = null
+      return
+    }
     if (request.mode === 'add') {
       openTaskAddLocal({
         date: request.date,
@@ -263,6 +283,7 @@ export function TaskDialog() {
         plannedStartTime: request.plannedStartTime,
         plannedSeconds: request.plannedSeconds,
       })
+      handledRequestRef.current = request
       return
     }
     setAddDraft(null)
@@ -272,6 +293,7 @@ export function TaskDialog() {
       setAutoCloseAfterCompleteTaskId(request.autoCloseAfterComplete ? request.taskId : null)
       setTimerTaskId(request.autoTimer ? request.taskId : null)
     }
+    handledRequestRef.current = request
   }, [request])
 
   const close = () => {
@@ -469,7 +491,6 @@ export function TaskDialog() {
 
   const submitPreviewEdit = () => {
     if (!previewTask) return
-    setEditWarningMessage(null)
     const draft = editTitleDraft.trim()
     const original = (editTitleOriginalRef.current?.taskId === previewTask.id ? editTitleOriginalRef.current.title : previewTask.title ?? '').trim()
     const addFallbackTitle = buildNextTaskTitle((previewSubject?.name ?? '').trim(), tasks)
@@ -489,7 +510,6 @@ export function TaskDialog() {
         setEditValidationMessage('완료 시작/종료 간격이 10시간을 넘어서 저장할 수 없어요.')
         return
       }
-      if (end < start) setEditWarningMessage('종료시간이 시작시간보다 빨라서, 다음날까지 진행한 것으로 계산돼요.')
     }
     setEditValidationMessage(null)
     if (isAddMode) {
@@ -537,7 +557,7 @@ export function TaskDialog() {
           }
           const start = previewTask.recordCompleteOnly ? null : hmToMinutes(previewTask.actualStartTime ?? null)
           const end = previewTask.recordCompleteOnly ? null : hmToMinutes(previewTask.actualEndTime ?? null)
-          const hasOnlyOne = !previewTask.recordCompleteOnly && ((start === null) !== (end === null))
+          const hasOnlyOne = !previewTask.recordCompleteOnly && start === null && end !== null
           const invalidRange = !previewTask.recordCompleteOnly && start !== null && end !== null && end < start
           if (hasOnlyOne || invalidRange) {
             setEditExitConfirmOpen(true)
@@ -666,13 +686,19 @@ export function TaskDialog() {
           })()}
 
           {isEditingPreview ? (
-            <div className="mt-2 px-4">
+            <div className="mt-3.5 px-4">
               <button
                 type="button"
                 onClick={() => setDatePickerField('date')}
-                className="inline-flex cursor-pointer items-center gap-2 text-base font-medium text-slate-500 underline decoration-slate-200 decoration-dotted underline-offset-4 transition hover:text-slate-700 hover:decoration-slate-400"
+                className="task-date-edit-trigger inline-flex cursor-pointer items-center gap-2 font-medium text-slate-500 underline decoration-slate-200 decoration-dotted underline-offset-4 transition hover:text-slate-700 hover:decoration-slate-400"
                 aria-label="날짜 선택"
               >
+                <svg viewBox="0 -960 960 960" className="shrink-0" aria-hidden="true">
+                  <path
+                    d="M200-80q-33 0-56.5-23.5T120-160v-560q0-33 23.5-56.5T200-800h40v-80h80v80h320v-80h80v80h40q33 0 56.5 23.5T840-720v560q0 33-23.5 56.5T760-80H200Zm0-80h560v-400H200v400Z"
+                    fill="currentColor"
+                  />
+                </svg>
                 <span>{formatTaskPreviewDate(previewTask.date) ?? '날짜 선택'}</span>
                 {previewTask.date ? (
                   <span
@@ -733,107 +759,162 @@ export function TaskDialog() {
                     </div>
 
                     {editValidationMessage ? <div className="text-sm font-semibold text-rose-700">{editValidationMessage}</div> : null}
-                    {editWarningMessage ? <div className="text-sm font-semibold text-amber-700">{editWarningMessage}</div> : null}
 
-                    <div className="flex min-w-0 flex-nowrap items-center gap-2 text-base font-medium text-slate-700">
-                        <span className="shrink-0 whitespace-nowrap rounded-full bg-slate-100 px-3 py-1.5 text-sm font-semibold text-slate-500">계획</span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setTimePickerField('plannedStartTime')
-                          setTimePickerOpen(true)
-                        }}
-                        className={`min-w-0 cursor-pointer truncate whitespace-nowrap text-left tracking-[-0.02em] underline decoration-dotted underline-offset-4 transition md:tracking-[-0.04em] ${
-                          previewTask.plannedStartTime ? 'text-slate-700 decoration-slate-200 hover:decoration-slate-400' : 'text-slate-400 decoration-slate-200 hover:decoration-slate-300'
-                        }`}
-                        aria-label="시작시간 입력"
-                      >
-                        {previewTask.plannedStartTime ? `${formatMeridiemHm(previewTask.plannedStartTime) ?? previewTask.plannedStartTime}부터` : '시작시간 입력'}
-                      </button>
-                      {previewTask.plannedStartTime ? (
-                        <button
-                          type="button"
-                          onClick={() => patchPreviewTask({ plannedStartTime: undefined })}
-                          className="shrink-0 cursor-pointer text-base font-semibold text-slate-400 transition hover:text-slate-600"
-                          aria-label="계획 시작시간 삭제"
-                        >
-                          ×
-                        </button>
-                      ) : null}
-                      <span className="shrink-0 px-1 text-slate-400">·</span>
-                      <DurationPickerButton
-                        valueSeconds={plannedSecondsDraft}
-                        onChangeSeconds={(nextSeconds) => setPlannedSecondsDraft(nextSeconds)}
-                        maxHours={10}
-                        buttonLabel={plannedSecondsDraft > 0 ? formatDurationPreciseKo(plannedSecondsDraft) : '소요시간 입력'}
-                        buttonClassName={`min-w-0 cursor-pointer truncate whitespace-nowrap text-left text-base font-medium tracking-[-0.02em] underline decoration-dotted underline-offset-4 transition md:tracking-[-0.04em] ${
-                          plannedSecondsDraft > 0 ? 'text-slate-700 decoration-slate-200 hover:decoration-slate-400' : 'text-slate-400 decoration-slate-200 hover:decoration-slate-300'
-                        }`}
-                        ariaLabel="소요시간 입력"
-                        open={plannedDurationPickerOpen}
-                        onOpenChange={(next) => {
-                          setPlannedDurationPickerOpen(next)
-                          if (!next) patchPreviewTask({ plannedSeconds: plannedSecondsDraft })
-                        }}
-                      />
-                      <span className="shrink-0 px-1 text-slate-400">·</span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (!previewTask.plannedStartTime) return
-                          setTimePickerField('plannedEndTime')
-                          setTimePickerOpen(true)
-                        }}
-                        className={`min-w-0 cursor-pointer truncate whitespace-nowrap text-left tracking-[-0.02em] underline decoration-dotted underline-offset-4 transition md:tracking-[-0.04em] ${
-                          previewTask.plannedStartTime && plannedSecondsDraft > 0
-                            ? 'text-slate-700 decoration-slate-200 hover:decoration-slate-400'
-                            : 'text-slate-400 decoration-slate-200 hover:decoration-slate-300'
-                        } ${previewTask.plannedStartTime ? '' : 'pointer-events-none'}`}
-                        aria-label="종료시간 입력"
-                      >
-                        {previewTask.plannedStartTime && plannedSecondsDraft > 0
-                          ? `${formatMeridiemHm(addSecondsToHm(previewTask.plannedStartTime, plannedSecondsDraft) ?? '') ?? addSecondsToHm(previewTask.plannedStartTime, plannedSecondsDraft)}까지`
-                          : '종료시간 입력'}
-                      </button>
-                      {previewTask.plannedStartTime && plannedSecondsDraft > 0 ? (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setPlannedSecondsDraft(0)
-                            patchPreviewTask({ plannedSeconds: 0 })
-                          }}
-                          className="shrink-0 cursor-pointer text-base font-semibold text-slate-400 transition hover:text-slate-600"
-                          aria-label="계획 종료/소요시간 삭제"
-                        >
-                          ×
-                        </button>
-                      ) : null}
+                    <div className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 gap-y-2">
+                      <span className="shrink-0 whitespace-nowrap rounded-full bg-slate-100 px-3 py-1.5 text-sm font-semibold text-slate-500">계획</span>
+                      <div className="min-w-0 text-base font-medium text-slate-700">
+                        <div className="flex min-w-0 items-center gap-3">
+                          <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setTimePickerField('plannedStartTime')
+                                setTimePickerOpen(true)
+                              }}
+                              className={`min-w-0 cursor-pointer truncate whitespace-nowrap text-left tracking-[-0.02em] underline decoration-dotted underline-offset-4 transition md:tracking-[-0.04em] ${
+                                previewTask.plannedStartTime
+                                  ? 'task-time-edit-filled task-time-edit-text text-slate-700 decoration-slate-200 hover:decoration-slate-400'
+                                  : 'text-slate-400 decoration-slate-200 hover:decoration-slate-300'
+                              }`}
+                              aria-label="시작시간"
+                            >
+                              {previewTask.plannedStartTime ? formatMeridiemHm(previewTask.plannedStartTime) ?? previewTask.plannedStartTime : '시작시간'}
+                            </button>
+                            <span className="shrink-0 text-slate-300">-</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (!previewTask.plannedStartTime) return
+                                setTimePickerField('plannedEndTime')
+                                setTimePickerOpen(true)
+                              }}
+                              className={`min-w-0 cursor-pointer truncate whitespace-nowrap text-left tracking-[-0.02em] underline decoration-dotted underline-offset-4 transition md:tracking-[-0.04em] ${
+                                previewTask.plannedStartTime && plannedSecondsDraft > 0
+                                  ? 'task-time-edit-filled task-time-edit-text text-slate-700 decoration-slate-200 hover:decoration-slate-400'
+                                  : 'text-slate-400 decoration-slate-200 hover:decoration-slate-300'
+                              } ${previewTask.plannedStartTime ? '' : 'pointer-events-none'}`}
+                              aria-label="종료시간"
+                            >
+                              {previewTask.plannedStartTime && plannedSecondsDraft > 0
+                                ? formatEndMeridiemHm(
+                                    previewTask.plannedStartTime,
+                                    addSecondsToHm(previewTask.plannedStartTime, plannedSecondsDraft) ?? '',
+                                  ) ??
+                                  addSecondsToHm(previewTask.plannedStartTime, plannedSecondsDraft) ??
+                                  '종료시간'
+                                : '종료시간'}
+                            </button>
+                          </div>
+                          <div className="flex shrink-0 items-center justify-end gap-2.5">
+                            <DurationPickerButton
+                              valueSeconds={plannedSecondsDraft}
+                              onChangeSeconds={(nextSeconds) => setPlannedSecondsDraft(nextSeconds)}
+                              maxHours={10}
+                              buttonLabel={plannedSecondsDraft > 0 ? formatDurationPreciseKo(plannedSecondsDraft) : '소요시간'}
+                              buttonClassName={`min-w-0 cursor-pointer truncate whitespace-nowrap text-right font-medium tracking-[-0.02em] underline decoration-dotted underline-offset-4 transition md:tracking-[-0.04em] ${
+                                plannedSecondsDraft > 0
+                                  ? 'task-time-edit-filled task-time-edit-text text-slate-700 decoration-slate-200 hover:decoration-slate-400'
+                                  : 'text-slate-400 decoration-slate-200 hover:decoration-slate-300'
+                              }`}
+                              ariaLabel="소요시간"
+                              open={plannedDurationPickerOpen}
+                              onOpenChange={(next) => {
+                                setPlannedDurationPickerOpen(next)
+                                if (!next) patchPreviewTask({ plannedSeconds: plannedSecondsDraft })
+                              }}
+                            />
+                            {previewTask.plannedStartTime || plannedSecondsDraft > 0 ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setPlannedSecondsDraft(0)
+                                  patchPreviewTask({ plannedStartTime: undefined, plannedSeconds: 0 })
+                                }}
+                                className="shrink-0 cursor-pointer text-base font-semibold text-slate-400 transition hover:text-slate-600"
+                                aria-label="계획 시간 삭제"
+                              >
+                                ×
+                              </button>
+                            ) : null}
+                          </div>
+                        </div>
+                      </div>
                     </div>
 
-                    <div className="flex flex-col gap-2 md:flex-row md:items-center">
-                      <div className="flex min-w-0 flex-nowrap items-center gap-3 text-base font-medium text-slate-700 md:flex-1">
-                        <span className="shrink-0 whitespace-nowrap rounded-full bg-black/80 px-3 py-1.5 text-sm font-semibold text-white">완료</span>
-                        {previewTask.recordCompleteOnly &&
-                        !previewTask.actualStartTime &&
-                        !previewTask.actualEndTime &&
-                        !(typeof previewTask.actualSeconds === 'number' && previewTask.actualSeconds > 0) ? (
-                          <span className="min-w-0 truncate whitespace-nowrap tracking-[-0.02em] text-slate-700 md:tracking-[-0.04em]">완료 처리</span>
-                        ) : (
-                          <>
+                    <div className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 gap-y-2">
+                      <span className="shrink-0 whitespace-nowrap rounded-full bg-black/80 px-3 py-1.5 text-sm font-semibold text-white">완료</span>
+                      <div className="min-w-0 text-base font-medium text-slate-700">
+                        <div className="flex min-w-0 items-center gap-3">
+                          <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
                             <button
                               type="button"
                               onClick={() => {
                                 setTimePickerField('actualStartTime')
                                 setTimePickerOpen(true)
                               }}
-                              className={`min-w-0 truncate whitespace-nowrap text-left tracking-[-0.02em] underline decoration-dotted underline-offset-4 transition md:tracking-[-0.04em] cursor-pointer ${
-                                previewTask.actualStartTime ? 'text-slate-700 decoration-slate-200 hover:decoration-slate-400' : 'text-slate-400 decoration-slate-200 hover:decoration-slate-300'
+                              className={`min-w-0 cursor-pointer truncate whitespace-nowrap text-left tracking-[-0.02em] underline decoration-dotted underline-offset-4 transition md:tracking-[-0.04em] ${
+                                previewTask.actualStartTime
+                                  ? 'task-time-edit-filled task-time-edit-text text-slate-700 decoration-slate-200 hover:decoration-slate-400'
+                                  : 'text-slate-400 decoration-slate-200 hover:decoration-slate-300'
                               }`}
-                              aria-label="시작시간 입력"
+                              aria-label="시작시간"
                             >
-                              {previewTask.actualStartTime ? `${formatMeridiemHm(previewTask.actualStartTime) ?? previewTask.actualStartTime}부터` : '시작시간 입력'}
+                              {previewTask.actualStartTime ? formatMeridiemHm(previewTask.actualStartTime) ?? previewTask.actualStartTime : '시작시간'}
                             </button>
-                            {previewTask.actualStartTime ? (
+                            <span className="shrink-0 text-slate-300">-</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setTimePickerField('actualEndTime')
+                                setTimePickerOpen(true)
+                              }}
+                              className={`min-w-0 cursor-pointer truncate whitespace-nowrap text-left tracking-[-0.02em] underline decoration-dotted underline-offset-4 transition md:tracking-[-0.04em] ${
+                                previewTask.actualEndTime
+                                  ? 'task-time-edit-filled task-time-edit-text text-slate-700 decoration-slate-200 hover:decoration-slate-400'
+                                  : 'text-slate-400 decoration-slate-200 hover:decoration-slate-300'
+                              }`}
+                              aria-label="종료시간"
+                            >
+                              {previewTask.actualEndTime
+                                ? formatEndMeridiemHm(previewTask.actualStartTime, previewTask.actualEndTime) ?? previewTask.actualEndTime
+                                : '종료시간'}
+                            </button>
+                          </div>
+                          <div className="flex shrink-0 items-center justify-end gap-2.5">
+                            <DurationPickerButton
+                              valueSeconds={actualSecondsDraft}
+                              onChangeSeconds={(nextSeconds) => setActualSecondsDraft(nextSeconds)}
+                              maxHours={10}
+                              buttonLabel={actualSecondsDraft > 0 ? formatDurationPreciseKo(actualSecondsDraft) : '소요시간'}
+                              buttonClassName={`min-w-0 cursor-pointer truncate whitespace-nowrap text-right font-medium tracking-[-0.02em] underline decoration-dotted underline-offset-4 transition md:tracking-[-0.04em] ${
+                                actualSecondsDraft > 0
+                                  ? 'task-time-edit-filled task-time-edit-text text-slate-700 decoration-slate-200 hover:decoration-slate-400'
+                                  : 'text-slate-400 decoration-slate-200 hover:decoration-slate-300'
+                              }`}
+                              ariaLabel="소요시간"
+                              open={actualDurationPickerOpen}
+                              onOpenChange={(next) => {
+                                setActualDurationPickerOpen(next)
+                                if (next) return
+                                if (!previewTask.actualStartTime) {
+                                  patchPreviewTask({
+                                    actualSeconds: actualSecondsDraft > 0 ? actualSecondsDraft : undefined,
+                                    actualEndTime: undefined,
+                                    status: actualSecondsDraft > 0 ? 'completed' : 'pending',
+                                    recordCompleteOnly: false,
+                                  })
+                                  return
+                                }
+                                const end = actualSecondsDraft > 0 ? addSecondsToHm(previewTask.actualStartTime, actualSecondsDraft) : null
+                                patchPreviewTask({
+                                  actualSeconds: actualSecondsDraft > 0 ? actualSecondsDraft : undefined,
+                                  actualEndTime: end ?? undefined,
+                                  status: 'completed',
+                                  recordCompleteOnly: false,
+                                })
+                              }}
+                            />
+                            {previewTask.actualStartTime || previewTask.actualEndTime || actualSecondsDraft > 0 || typeof previewTask.actualSeconds === 'number' ? (
                               <button
                                 type="button"
                                 onClick={() => {
@@ -847,114 +928,57 @@ export function TaskDialog() {
                                   setActualSecondsDraft(0)
                                 }}
                                 className="shrink-0 cursor-pointer text-base font-semibold text-slate-400 transition hover:text-slate-600"
-                                aria-label="완료 시작시간 삭제"
+                                aria-label="완료 시간 삭제"
                               >
                                 ×
                               </button>
                             ) : null}
-                            <span className="shrink-0 px-1 text-slate-400">·</span>
-                            <DurationPickerButton
-                              valueSeconds={actualSecondsDraft}
-                              onChangeSeconds={(nextSeconds) => setActualSecondsDraft(nextSeconds)}
-                              maxHours={10}
-                              buttonLabel={actualSecondsDraft > 0 ? formatDurationPreciseKo(actualSecondsDraft) : '소요시간 입력'}
-                              buttonClassName={`min-w-0 cursor-pointer truncate whitespace-nowrap text-left text-base font-medium tracking-[-0.02em] underline decoration-dotted underline-offset-4 transition md:tracking-[-0.04em] ${
-                                actualSecondsDraft > 0 ? 'text-slate-700 decoration-slate-200 hover:decoration-slate-400' : 'text-slate-400 decoration-slate-200 hover:decoration-slate-300'
-                              }`}
-                              ariaLabel="완료 소요시간 입력"
-                              open={actualDurationPickerOpen}
-                              onOpenChange={(next) => {
-                                setActualDurationPickerOpen(next)
-                                if (next) return
-                                if (!previewTask.actualStartTime) {
-                                  patchPreviewTask({ actualSeconds: actualSecondsDraft, status: 'completed', recordCompleteOnly: false })
+                          </div>
+                        </div>
+                        <label className="mt-2 flex w-fit cursor-pointer items-center gap-2 justify-self-end pt-1 text-sm font-semibold text-slate-600 ml-auto">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(
+                              previewTask.status === 'completed' ||
+                                previewTask.recordCompleteOnly ||
+                                previewTask.actualStartTime ||
+                                previewTask.actualEndTime ||
+                                typeof previewTask.actualSeconds === 'number',
+                            )}
+                            onChange={(e) => {
+                              const checked = e.target.checked
+                              const hasRecordedTime =
+                                Boolean(previewTask.actualStartTime && previewTask.actualEndTime) || typeof previewTask.actualSeconds === 'number'
+                              if (checked) {
+                                if (hasRecordedTime) {
+                                  patchPreviewTask({ status: 'completed', recordCompleteOnly: false })
                                   return
                                 }
-                                const end = actualSecondsDraft > 0 ? addSecondsToHm(previewTask.actualStartTime, actualSecondsDraft) : null
+                                const plannedStart = previewTask.plannedStartTime
+                                const plannedSeconds = previewTask.plannedSeconds ?? 0
+                                const plannedEnd = plannedStart && plannedSeconds > 0 ? addSecondsToHm(plannedStart, plannedSeconds) : null
                                 patchPreviewTask({
-                                  actualSeconds: actualSecondsDraft > 0 ? actualSecondsDraft : undefined,
-                                  actualEndTime: end ?? previewTask.actualEndTime,
                                   status: 'completed',
-                                  recordCompleteOnly: false,
+                                  recordCompleteOnly: true,
+                                  actualStartTime: plannedStart && plannedEnd ? plannedStart : undefined,
+                                  actualEndTime: plannedStart && plannedEnd ? plannedEnd : undefined,
+                                  actualSeconds: undefined,
                                 })
-                              }}
-                            />
-                            <span className="shrink-0 px-1 text-slate-400">·</span>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setTimePickerField('actualEndTime')
-                                setTimePickerOpen(true)
-                              }}
-                              className={`min-w-0 truncate whitespace-nowrap text-left tracking-[-0.02em] underline decoration-dotted underline-offset-4 transition md:tracking-[-0.04em] cursor-pointer ${
-                                previewTask.actualEndTime ? 'text-slate-700 decoration-slate-200 hover:decoration-slate-400' : 'text-slate-400 decoration-slate-200 hover:decoration-slate-300'
-                              }`}
-                              aria-label="종료시간 입력"
-                            >
-                              {previewTask.actualEndTime ? `${formatMeridiemHm(previewTask.actualEndTime) ?? previewTask.actualEndTime}까지` : '종료시간 입력'}
-                            </button>
-                            {previewTask.actualEndTime || actualSecondsDraft > 0 || typeof previewTask.actualSeconds === 'number' ? (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  patchPreviewTask({
-                                    actualEndTime: undefined,
-                                    actualSeconds: undefined,
-                                  })
-                                  setActualSecondsDraft(0)
-                                }}
-                                className="shrink-0 cursor-pointer text-base font-semibold text-slate-400 transition hover:text-slate-600"
-                                aria-label="완료 종료/소요시간 삭제"
-                              >
-                                ×
-                              </button>
-                            ) : null}
-                          </>
-                        )}
-                      </div>
-                      <label className="flex w-fit cursor-pointer items-center gap-2 self-end text-sm font-semibold text-slate-600 md:ml-auto md:self-auto">
-                        <input
-                          type="checkbox"
-                          checked={Boolean(
-                            previewTask.status === 'completed' ||
-                              previewTask.recordCompleteOnly ||
-                              previewTask.actualStartTime ||
-                              previewTask.actualEndTime ||
-                              typeof previewTask.actualSeconds === 'number',
-                          )}
-                          onChange={(e) => {
-                            const checked = e.target.checked
-                            const hasRecordedTime =
-                              Boolean(previewTask.actualStartTime && previewTask.actualEndTime) || typeof previewTask.actualSeconds === 'number'
-                            if (checked) {
-                              if (hasRecordedTime) {
-                                patchPreviewTask({ status: 'completed', recordCompleteOnly: false })
                                 return
                               }
-                              const plannedStart = previewTask.plannedStartTime
-                              const plannedSeconds = previewTask.plannedSeconds ?? 0
-                              const plannedEnd = plannedStart && plannedSeconds > 0 ? addSecondsToHm(plannedStart, plannedSeconds) : null
                               patchPreviewTask({
-                                status: 'completed',
-                                recordCompleteOnly: true,
-                                actualStartTime: plannedStart && plannedEnd ? plannedStart : undefined,
-                                actualEndTime: plannedStart && plannedEnd ? plannedEnd : undefined,
+                                recordCompleteOnly: false,
+                                status: 'pending',
+                                actualStartTime: undefined,
+                                actualEndTime: undefined,
                                 actualSeconds: undefined,
                               })
-                              return
-                            }
-                            patchPreviewTask({
-                              recordCompleteOnly: false,
-                              status: 'pending',
-                              actualStartTime: undefined,
-                              actualEndTime: undefined,
-                              actualSeconds: undefined,
-                            })
-                          }}
-                          className="h-4 w-4 rounded border-slate-300"
-                        />
-                        완료 처리
-                      </label>
+                            }}
+                            className="h-4 w-4 rounded border-slate-300"
+                          />
+                          완료 처리
+                        </label>
+                      </div>
                     </div>
                   </div>
                 ) : (
@@ -1009,7 +1033,7 @@ export function TaskDialog() {
         </div>
 
         {isEditingPreview ? (
-          <div className="sticky bottom-0 border-t border-slate-100 bg-white/95 px-5 py-4 backdrop-blur md:px-6">
+          <div className="safe-bottom-sheet-footer sticky bottom-0 border-t border-slate-100 bg-white px-5 pt-4 backdrop-blur md:px-6">
             <div className="grid grid-cols-2 gap-3">
               <button
                 type="button"
@@ -1028,7 +1052,7 @@ export function TaskDialog() {
                   }
                   const start = previewTask.recordCompleteOnly ? null : hmToMinutes(previewTask.actualStartTime ?? null)
                   const end = previewTask.recordCompleteOnly ? null : hmToMinutes(previewTask.actualEndTime ?? null)
-                  const hasOnlyOne = !previewTask.recordCompleteOnly && ((start === null) !== (end === null))
+                  const hasOnlyOne = !previewTask.recordCompleteOnly && start === null && end !== null
                   const invalidRange = !previewTask.recordCompleteOnly && start !== null && end !== null && end < start
                   if (hasOnlyOne || invalidRange) {
                     setEditExitConfirmOpen(true)
@@ -1045,7 +1069,7 @@ export function TaskDialog() {
             </div>
           </div>
         ) : (
-          <div className="sticky bottom-0 border-t border-slate-100 bg-white/95 px-5 py-4 backdrop-blur md:px-6">
+          <div className="safe-bottom-sheet-footer sticky bottom-0 border-t border-slate-100 bg-white px-5 pt-4 backdrop-blur md:px-6">
             <div className="grid grid-cols-3 gap-2">
               <button
                 type="button"
@@ -1089,13 +1113,27 @@ export function TaskDialog() {
       {isEditingPreview && datePickerField ? (
         <div
           className="fixed inset-0 z-[75] flex items-center justify-center bg-slate-900/35 px-4"
-          onMouseDown={(e) => {
+          onPointerDownCapture={(e) => {
+            if (e.target !== e.currentTarget) return
+            e.preventDefault()
             e.stopPropagation()
-            if (e.target === e.currentTarget) setDatePickerField(null)
+            window.setTimeout(() => setDatePickerField(null), 0)
           }}
-          onTouchStart={(e) => {
+          onMouseDownCapture={(e) => {
+            if (e.target !== e.currentTarget) return
+            e.preventDefault()
             e.stopPropagation()
-            if (e.target === e.currentTarget) setDatePickerField(null)
+          }}
+          onTouchStartCapture={(e) => {
+            if (e.target !== e.currentTarget) return
+            e.preventDefault()
+            e.stopPropagation()
+            window.setTimeout(() => setDatePickerField(null), 0)
+          }}
+          onClickCapture={(e) => {
+            if (e.target !== e.currentTarget) return
+            e.preventDefault()
+            e.stopPropagation()
           }}
         >
           <div className="w-full max-w-sm rounded-2xl bg-white p-4 shadow-2xl">
@@ -1187,8 +1225,7 @@ export function TaskDialog() {
           }
           onApply={(hm) => {
             if (!previewTask) return
-            setEditWarningMessage(null)
-            if (timePickerField === 'actualStartTime') {
+                  if (timePickerField === 'actualStartTime') {
               const startMin = hmToMinutes(hm)
               const endMin = hmToMinutes(previewTask.actualEndTime ?? null)
               if (startMin === null) return
@@ -1197,7 +1234,6 @@ export function TaskDialog() {
                 if (endMin === startMin) return
                 const diffMin = endMin > startMin ? endMin - startMin : endMin + 24 * 60 - startMin
                 if (diffMin > 10 * 60) return
-                if (endMin < startMin) setEditWarningMessage('종료시간이 시작시간보다 빨라서, 다음날까지 진행한 것으로 계산돼요.')
                 nextActualSeconds = Math.max(0, diffMin * 60)
                 setActualSecondsDraft(nextActualSeconds)
               }
@@ -1216,7 +1252,6 @@ export function TaskDialog() {
                 if (endMin === startMin) return
                 const diffMin = endMin > startMin ? endMin - startMin : endMin + 24 * 60 - startMin
                 if (diffMin > 10 * 60) return
-                if (endMin < startMin) setEditWarningMessage('종료시간이 시작시간보다 빨라서, 다음날까지 진행한 것으로 계산돼요.')
                 const nextSeconds = Math.max(0, diffMin * 60)
                 setActualSecondsDraft(nextSeconds)
                 patchPreviewTask({
@@ -1237,7 +1272,6 @@ export function TaskDialog() {
               if (endMin === startMin) return
               const diffMin = endMin > startMin ? endMin - startMin : endMin + 24 * 60 - startMin
               if (diffMin > 10 * 60) return
-              if (endMin < startMin) setEditWarningMessage('종료시간이 시작시간보다 빨라서, 다음날까지 진행한 것으로 계산돼요.')
               const nextSeconds = diffMin * 60
               setPlannedSecondsDraft(nextSeconds)
               patchPreviewTask({ plannedSeconds: nextSeconds })

@@ -10,7 +10,7 @@ import { TaskDialogContext } from './TaskDialogContext'
 import { TaskDialog } from './TaskDialog'
 import { SubjectDialog } from './SubjectDialog'
 import { IconCalendarMonth, IconCalendarViewDay, IconCalendarWeek, IconPlus } from './NavIcons'
-import { getTaskDragId, setTaskDragData, syncTaskDropEffect } from '../lib/taskDrag'
+import { getTaskDragId, setTaskDragData, setTaskDragPreview, syncTaskDropEffect } from '../lib/taskDrag'
 import { ContextMenu, type ContextMenuItem, type ContextMenuState } from './ContextMenu'
 import { copyTaskToClipboard, getTaskClipboard, pasteTaskFromClipboard } from '../lib/taskClipboard'
 import { useTouchContextMenu } from '../lib/useTouchContextMenu'
@@ -383,7 +383,7 @@ function AppLayoutContent() {
         <div
           className="h-full [--bottom-nav-h:72px]"
           style={{
-            ['--bottom-nav-safe-gap' as string]: hasBottomSafeArea ? '12px' : '0px',
+            ['--bottom-nav-safe-gap' as string]: hasBottomSafeArea ? 'var(--ios-bottom-swipe-gap)' : '0px',
             ['--bottom-safe-inset' as string]: hasBottomSafeArea ? 'env(safe-area-inset-bottom)' : '0px',
             ['--bottom-overlay-offset' as string]: 'calc(var(--bottom-safe-inset, 0px) + var(--bottom-nav-safe-gap, 0px))',
           }}
@@ -499,6 +499,7 @@ function AppLayoutContent() {
                                       draggable
                                       onDragStart={(e) => {
                                         setTaskDragData(e.dataTransfer, t.id)
+                                        setTaskDragPreview(e.dataTransfer, e.currentTarget, e.clientX, e.clientY)
                                       }}
                                       {...taskTouchContextMenu.bind(`sidebar-unassigned:${t.id}`, ({ x, y }) => openSidebarTaskMenuAt(x, y, t.id))}
                                       className="block min-w-0 select-none rounded-lg px-3 py-2 text-left text-[12px] leading-tight"
@@ -628,6 +629,7 @@ function AppLayoutContent() {
                                         draggable
                                         onDragStart={(e) => {
                                           setTaskDragData(e.dataTransfer, t.id)
+                                          setTaskDragPreview(e.dataTransfer, e.currentTarget, e.clientX, e.clientY)
                                         }}
                                         {...taskTouchContextMenu.bind(`sidebar-day:${t.id}`, ({ x, y }) => openSidebarTaskMenuAt(x, y, t.id))}
                                         className={`block w-full min-w-0 select-none rounded-lg px-3 py-2 text-left text-[12px] leading-tight shadow-sm ${
@@ -776,10 +778,9 @@ function AppLayoutContent() {
 
           {!hideBottom ? (
             <div
-              className="fixed inset-x-0 z-30 border-t border-slate-200 bg-white/95 shadow-[0_-12px_40px_rgba(15,23,42,0.08)] backdrop-blur md:hidden"
-              style={{ bottom: 'var(--bottom-overlay-offset, 0px)' }}
+              className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white shadow-[0_-12px_40px_rgba(15,23,42,0.08)] md:hidden"
             >
-              <div>
+              <div style={{ paddingBottom: 'var(--bottom-overlay-offset, 0px)' }}>
                 <div className="mx-auto grid max-w-xl grid-cols-5 px-2 pb-2 pt-2">
 	                  <BottomNavItem
 	                    to="/"
