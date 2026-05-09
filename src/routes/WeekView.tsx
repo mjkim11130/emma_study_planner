@@ -1,6 +1,6 @@
 import { addDays, differenceInCalendarDays, format, isSameDay, isValid, parseISO, startOfWeek } from 'date-fns'
 import { ko } from 'date-fns/locale'
-import { useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { ContextMenu, type ContextMenuItem, type ContextMenuState } from '../components/ContextMenu'
 import { useConfirmDialog } from '../components/ConfirmDialog'
@@ -11,6 +11,9 @@ import { todayYmd } from '../lib/dates'
 import { useTaskDialog } from '../components/TaskDialogContext'
 import { usePlannerStore } from '../store/usePlannerStore'
 import type { StudyTask } from '../store/types'
+import { getTaskDragId, setTaskDragData, syncTaskDropEffect } from '../lib/taskDrag'
+import { copyTaskToClipboard, getTaskClipboard, pasteTaskFromClipboard } from '../lib/taskClipboard'
+import { useTouchContextMenu } from '../lib/useTouchContextMenu'
 
 function hmToMinutes(hm?: string | null) {
   if (!hm) return null
@@ -75,7 +78,9 @@ export function WeekView() {
   const activeExam = usePlannerStore(useMemo(() => (s) => s.exams.find((e) => e.id === activeExamId), [activeExamId]))
   const subjects = usePlannerStore((s) => s.subjects)
   const tasks = usePlannerStore((s) => s.tasks)
+  const addTask = usePlannerStore((s) => s.addTask)
   const updateTask = usePlannerStore((s) => s.updateTask)
+  const duplicateTask = usePlannerStore((s) => s.duplicateTask)
   const deleteTask = usePlannerStore((s) => s.deleteTask)
 
   const weekStartDate = useMemo(() => {
@@ -122,11 +127,28 @@ export function WeekView() {
 
   const [dragOverKey, setDragOverKey] = useState<string | null>(null)
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
+  const taskTouchContextMenu = useTouchContextMenu()
   const openContextMenu = (e: ReactMouseEvent, items: ContextMenuItem[]) => {
     e.preventDefault()
     e.stopPropagation()
     setContextMenu({ x: e.clientX, y: e.clientY, items })
   }
+  const openContextMenuAt = (x: number, y: number, items: ContextMenuItem[]) => {
+    setContextMenu({ x, y, items })
+  }
+  const touchLongPressRef = useRef<{
+    timer: number | null
+    armed: boolean
+    keyId: string | null
+    startX: number
+    startY: number
+    moved: boolean
+  }>({ timer: null, armed: false, keyId: null, startX: 0, startY: 0, moved: false })
+  const suppressTouchClickUntilRef = useRef(0)
+  const suppressTouchClick = () => {
+    suppressTouchClickUntilRef.current = Date.now() + 350
+  }
+  const shouldIgnoreTouchClick = () => Date.now() < suppressTouchClickUntilRef.current
   const setWeekStart = (d: Date) => {
     const next = format(startOfWeek(d, { weekStartsOn: 1 }), 'yyyy-MM-dd')
     setSearchParams((prev) => {
@@ -163,9 +185,12 @@ export function WeekView() {
     return `${weekLabel} · ${examCountdown.dday}`
   }, [activeExam, examCountdown])
 
-  const openTaskMenu = (e: ReactMouseEvent, t: StudyTask) => {
-    openContextMenu(e, [
+  const buildTaskMenuItems = (t: StudyTask) =>
+    ({
+      header: { title: t.title || '제목 없음', color: subjectById.get(t.subjectId)?.color ?? '#94a3b8' },
+      items: [
       { key: 'timer', label: '타이머', onSelect: () => openTaskPreview(t.id, { autoTimer: true }) },
+      { key: 'copy', label: '일정 복사', onSelect: () => copyTaskToClipboard(t) },
       { key: 'edit', label: '편집', onSelect: () => openTaskPreview(t.id, { autoEdit: true }) },
       {
         key: 'delete',
@@ -182,16 +207,60 @@ export function WeekView() {
           deleteTask(t.id)
         },
       },
-    ])
+      ] satisfies ContextMenuItem[],
+    })
+
+  const openTaskMenu = (e: ReactMouseEvent, t: StudyTask) => {
+    const menu = buildTaskMenuItems(t)
+    e.preventDefault()
+    e.stopPropagation()
+    setContextMenu({ x: e.clientX, y: e.clientY, ...menu })
+  }
+
+  const openTaskMenuAt = (x: number, y: number, t: StudyTask) => {
+    setContextMenu({ x, y, ...buildTaskMenuItems(t) })
   }
 
   const openDateMenu = (e: ReactMouseEvent, ymd: string) => {
-    openContextMenu(e, [
-      { key: 'add', label: '일정 추가', icon: <IconPlus className="h-4 w-4" />, onSelect: () => openTaskAdd({ date: ymd }) },
-      { key: 'month', label: '월간 캘린더 보기', icon: <IconCalendarMonth className="h-4 w-4" />, onSelect: () => navigate(`/?month=${encodeURIComponent(ymd.slice(0, 7))}`) },
-      { key: 'timeline', label: '타임라인 보기', icon: <IconCalendarViewDay className="h-4 w-4" />, onSelect: () => navigate(`/day/${ymd}`) },
-      { key: 'planned', label: '일일 계획 보기', icon: <IconChecklist className="h-4 w-4" />, onSelect: () => navigate(`/day/${ymd}?view=planned`) },
-    ])
+    const items: ContextMenuItem[] = [{ key: 'add', label: '일정 추가', icon: <IconPlus className="h-4 w-4" />, onSelect: () => openTaskAdd({ date: ymd }) }]
+    if (getTaskClipboard()) {
+      items.push({
+        key: 'paste',
+        label: '일정 붙여넣기',
+        onSelect: () => {
+          pasteTaskFromClipboard(addTask, { date: ymd })
+        },
+      })
+    }
+    if (ymd) {
+      items.push(
+        { key: 'month', label: '월간 캘린더 보기', icon: <IconCalendarMonth className="h-4 w-4" />, onSelect: () => navigate(`/?month=${encodeURIComponent(ymd.slice(0, 7))}`) },
+        { key: 'timeline', label: '타임라인 보기', icon: <IconCalendarViewDay className="h-4 w-4" />, onSelect: () => navigate(`/day/${ymd}`) },
+        { key: 'planned', label: '일일 계획 보기', icon: <IconChecklist className="h-4 w-4" />, onSelect: () => navigate(`/day/${ymd}?view=planned`) },
+      )
+    }
+    openContextMenu(e, items)
+  }
+
+  const openDateMenuAt = (x: number, y: number, ymd: string) => {
+    const items: ContextMenuItem[] = [{ key: 'add', label: '일정 추가', icon: <IconPlus className="h-4 w-4" />, onSelect: () => openTaskAdd({ date: ymd }) }]
+    if (getTaskClipboard()) {
+      items.push({
+        key: 'paste',
+        label: '일정 붙여넣기',
+        onSelect: () => {
+          pasteTaskFromClipboard(addTask, { date: ymd })
+        },
+      })
+    }
+    if (ymd) {
+      items.push(
+        { key: 'month', label: '월간 캘린더 보기', icon: <IconCalendarMonth className="h-4 w-4" />, onSelect: () => navigate(`/?month=${encodeURIComponent(ymd.slice(0, 7))}`) },
+        { key: 'timeline', label: '타임라인 보기', icon: <IconCalendarViewDay className="h-4 w-4" />, onSelect: () => navigate(`/day/${ymd}`) },
+        { key: 'planned', label: '일일 계획 보기', icon: <IconChecklist className="h-4 w-4" />, onSelect: () => navigate(`/day/${ymd}?view=planned`) },
+      )
+    }
+    openContextMenuAt(x, y, items)
   }
 
   const renderTask = (t: StudyTask) => {
@@ -203,13 +272,16 @@ export function WeekView() {
       <button
         key={t.id}
         type="button"
-        onClick={() => openTaskPreview(t.id)}
+        onClick={() => {
+          if (taskTouchContextMenu.shouldIgnoreClick()) return
+          openTaskPreview(t.id)
+        }}
         draggable
         onDragStart={(e) => {
-          e.dataTransfer.setData('text/emma-task-id', t.id)
-          e.dataTransfer.effectAllowed = 'move'
+          setTaskDragData(e.dataTransfer, t.id)
         }}
         onContextMenu={(e) => openTaskMenu(e, t)}
+        {...taskTouchContextMenu.bind(`week-task:${t.id}`, ({ x, y }) => openTaskMenuAt(x, y, t))}
         data-task-card="true"
         className="flex w-full select-none items-center gap-1 rounded-[4px] border border-black/10 px-1.5 py-1 text-left text-[11px] font-semibold leading-tight shadow-sm"
         style={{ backgroundColor: bg, color: onText }}
@@ -250,23 +322,70 @@ export function WeekView() {
         dragOverKey === keyId ? 'ring-2 ring-slate-400' : ''
       } ${tone === 'muted' ? 'bg-slate-50 saturate-[0.92]' : ''} ${canOpenDay ? 'cursor-pointer' : ''}`}
       onClick={(e) => {
+        if (shouldIgnoreTouchClick()) return
         if (!canOpenDay) return
         const target = e.target as HTMLElement
         if (target.closest('[data-task-card="true"]') || target.closest('[data-cell-action="add"]')) return
         onOpenDay()
       }}
+      onPointerDown={(e) => {
+        if (e.pointerType !== 'touch') return
+        const target = e.target as HTMLElement
+        if (target.closest('[data-task-card="true"]') || target.closest('[data-cell-action="add"]')) return
+        if (touchLongPressRef.current.timer) window.clearTimeout(touchLongPressRef.current.timer)
+        touchLongPressRef.current.armed = false
+        touchLongPressRef.current.keyId = keyId
+        touchLongPressRef.current.startX = e.clientX
+        touchLongPressRef.current.startY = e.clientY
+        touchLongPressRef.current.moved = false
+        touchLongPressRef.current.timer = window.setTimeout(() => {
+          touchLongPressRef.current.timer = null
+          touchLongPressRef.current.armed = true
+        }, 420)
+      }}
+      onPointerMove={(e) => {
+        if (e.pointerType !== 'touch') return
+        if (touchLongPressRef.current.keyId !== keyId) return
+        const dx = e.clientX - touchLongPressRef.current.startX
+        const dy = e.clientY - touchLongPressRef.current.startY
+        if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return
+        touchLongPressRef.current.moved = true
+        if (touchLongPressRef.current.timer) window.clearTimeout(touchLongPressRef.current.timer)
+        touchLongPressRef.current.timer = null
+        touchLongPressRef.current.armed = false
+      }}
+      onPointerUp={(e) => {
+        if (e.pointerType !== 'touch') return
+        if (touchLongPressRef.current.timer) window.clearTimeout(touchLongPressRef.current.timer)
+        const armed = touchLongPressRef.current.armed
+        const moved = touchLongPressRef.current.moved
+        touchLongPressRef.current.timer = null
+        touchLongPressRef.current.armed = false
+        touchLongPressRef.current.keyId = null
+        if (moved || !armed) return
+        suppressTouchClick()
+        openDateMenuAt(e.clientX, e.clientY, keyId === '__unassigned__' ? '' : keyId)
+      }}
+      onPointerCancel={() => {
+        if (touchLongPressRef.current.timer) window.clearTimeout(touchLongPressRef.current.timer)
+        touchLongPressRef.current.timer = null
+        touchLongPressRef.current.armed = false
+        touchLongPressRef.current.keyId = null
+      }}
       onDragOver={(e) => {
         e.preventDefault()
+        syncTaskDropEffect(e)
         setDragOverKey(keyId)
       }}
       onDragLeave={() => setDragOverKey((cur) => (cur === keyId ? null : cur))}
       onDrop={(e) => {
         e.preventDefault()
         setDragOverKey(null)
-        const taskId = e.dataTransfer.getData('text/emma-task-id')
+        const taskId = getTaskDragId(e.dataTransfer)
         if (!taskId) return
-        if (keyId === '__unassigned__') updateTask(taskId, { date: '' })
-        else updateTask(taskId, { date: keyId })
+        const nextDate = keyId === '__unassigned__' ? '' : keyId
+        if (e.altKey) duplicateTask(taskId, { date: nextDate })
+        else updateTask(taskId, { date: nextDate })
       }}
       onContextMenu={onContextMenu}
     >
@@ -305,7 +424,7 @@ export function WeekView() {
   )
 
   return (
-    <div className="flex h-[calc(100dvh-72px-env(safe-area-inset-bottom))] flex-col overflow-hidden">
+    <div className="flex h-[calc(100dvh-var(--bottom-nav-h,72px)-var(--bottom-overlay-offset,0px))] flex-col overflow-hidden">
       <MobileTopBar
         title=""
         center={
@@ -387,6 +506,7 @@ export function WeekView() {
                 onOpenDay={() => {}}
                 items={tasksByDate.unassigned}
                 canOpenDay={false}
+                onContextMenu={(e) => openDateMenu(e, '')}
               />,
             ]
             // Keep exactly 8 cells even if something changes unexpectedly.

@@ -881,13 +881,11 @@ export function SubjectDashboardView() {
   const [cursorYmd, setCursorYmd] = useState(() => todayYmd())
   const [query, setQuery] = useState('')
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
-  const openContextMenu = (e: ReactMouseEvent, items: ContextMenuItem[]) => {
-    e.preventDefault()
-    e.stopPropagation()
-    setContextMenu({ x: e.clientX, y: e.clientY, items })
-  }
   const openTaskMenu = (e: ReactMouseEvent, taskId: string) => {
-    openContextMenu(e, [
+    const task = tasks.find((t) => t.id === taskId)
+    const menu = {
+      header: { title: task?.title || '제목 없음', color: subjects.find((s) => s.id === task?.subjectId)?.color ?? '#94a3b8' },
+      items: [
       { key: 'timer', label: '타이머', onSelect: () => openTaskPreview(taskId, { autoTimer: true }) },
       { key: 'edit', label: '편집', onSelect: () => openTaskPreview(taskId, { autoEdit: true }) },
       {
@@ -905,7 +903,11 @@ export function SubjectDashboardView() {
           deleteTask(taskId)
         },
       },
-    ])
+      ] satisfies ContextMenuItem[],
+    }
+    e.preventDefault()
+    e.stopPropagation()
+    setContextMenu({ x: e.clientX, y: e.clientY, ...menu })
   }
 
   const cursorDate = useMemo(() => parseISO(cursorYmd), [cursorYmd])
@@ -1133,7 +1135,7 @@ export function SubjectDashboardView() {
   }, [reorderOpen, scopedSubjectsOrdered])
 
   return (
-    <div className="flex h-[calc(100dvh-72px-env(safe-area-inset-bottom))] flex-col overflow-hidden">
+    <div className="flex h-[calc(100dvh-var(--bottom-nav-h,72px)-var(--bottom-overlay-offset,0px))] flex-col overflow-hidden">
       <MobileTopBar
         title={topTitle}
         left={

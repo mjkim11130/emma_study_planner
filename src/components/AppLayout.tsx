@@ -1,15 +1,19 @@
-import { createContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { createContext, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { usePlannerStore } from '../store/usePlannerStore'
 import { formatDurationKoFromSeconds } from '../lib/time'
 import { todayYmd } from '../lib/dates'
 import { formatDday } from '../lib/dday'
 import { Button } from './ui'
-import { ConfirmDialogProvider } from './ConfirmDialog'
+import { ConfirmDialogProvider, useConfirmDialog } from './ConfirmDialog'
 import { TaskDialogContext } from './TaskDialogContext'
 import { TaskDialog } from './TaskDialog'
 import { SubjectDialog } from './SubjectDialog'
-import { IconCalendarMonth, IconCalendarViewDay, IconCalendarWeek } from './NavIcons'
+import { IconCalendarMonth, IconCalendarViewDay, IconCalendarWeek, IconPlus } from './NavIcons'
+import { getTaskDragId, setTaskDragData, syncTaskDropEffect } from '../lib/taskDrag'
+import { ContextMenu, type ContextMenuItem, type ContextMenuState } from './ContextMenu'
+import { copyTaskToClipboard, getTaskClipboard, pasteTaskFromClipboard } from '../lib/taskClipboard'
+import { useTouchContextMenu } from '../lib/useTouchContextMenu'
 
 export const SidebarToggleContext = createContext<{ open: boolean; toggle: () => void } | null>(null)
 
@@ -106,15 +110,28 @@ function NavItem({
 }
 
 export function AppLayout() {
+  return (
+    <ConfirmDialogProvider>
+      <AppLayoutContent />
+    </ConfirmDialogProvider>
+  )
+}
+
+function AppLayoutContent() {
   const location = useLocation()
+  const { confirm } = useConfirmDialog()
   const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [hasBottomSafeArea, setHasBottomSafeArea] = useState(false)
   const hideBottom = false
   const activeExamId = usePlannerStore((s) => s.activeExamId)
   const subjects = usePlannerStore((s) => s.subjects)
   const subjectOrderByExam = usePlannerStore((s) => s.subjectOrderByExam)
   const setSubjectOrder = usePlannerStore((s) => s.setSubjectOrder)
   const tasks = usePlannerStore((s) => s.tasks)
+  const addTask = usePlannerStore((s) => s.addTask)
   const updateTask = usePlannerStore((s) => s.updateTask)
+  const duplicateTask = usePlannerStore((s) => s.duplicateTask)
+  const deleteTask = usePlannerStore((s) => s.deleteTask)
   const lastUsedSubjectIdByExam = usePlannerStore((s) => s.lastUsedSubjectIdByExam)
   const isCalendarPage = location.pathname === '/' || location.pathname.startsWith('/calendar')
   const isWeekPage = location.pathname.startsWith('/week')
@@ -122,10 +139,14 @@ export function AppLayout() {
   const isDashboardPage = location.pathname.startsWith('/dashboard')
   const dayPageMatch = /^\/day\/(\d{4}-\d{2}-\d{2})$/.exec(location.pathname)
   const dayPageDate = dayPageMatch?.[1] ?? ''
-  const [taskDialogRequest, setTaskDialogRequest] = useState<null | { mode: 'add'; date?: string; subjectId?: string } | { mode: 'preview'; taskId: string; autoEdit?: boolean; autoCloseAfterComplete?: boolean }>(null)
+  const [taskDialogRequest, setTaskDialogRequest] = useState<
+    null | { mode: 'add'; date?: string; subjectId?: string } | { mode: 'preview'; taskId: string; autoEdit?: boolean; autoCloseAfterComplete?: boolean; autoTimer?: boolean }
+  >(null)
   const [subjectDialogOpen, setSubjectDialogOpen] = useState(false)
   const [subjectDialogForTaskCreate, setSubjectDialogForTaskCreate] = useState(false)
   const [pendingTaskCreate, setPendingTaskCreate] = useState<null | { date?: string }>(null)
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
+  const taskTouchContextMenu = useTouchContextMenu()
   const [sidebarSubjectGroupsOpen, setSidebarSubjectGroupsOpen] = useState(() => {
     try {
       const raw = window.localStorage.getItem('emma-study-planner:sidebarSubjectGroupsOpen:v1')
@@ -143,6 +164,33 @@ export function AppLayout() {
       // ignore
     }
   }, [sidebarSubjectGroupsOpen])
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return
+    const probe = document.createElement('div')
+    probe.style.position = 'fixed'
+    probe.style.left = '0'
+    probe.style.bottom = '0'
+    probe.style.visibility = 'hidden'
+    probe.style.pointerEvents = 'none'
+    probe.style.paddingBottom = 'env(safe-area-inset-bottom)'
+    document.body.appendChild(probe)
+
+    const measure = () => {
+      const inset = Number.parseFloat(window.getComputedStyle(probe).paddingBottom || '0')
+      setHasBottomSafeArea(inset > 0.5)
+    }
+
+    measure()
+    window.addEventListener('resize', measure)
+    window.visualViewport?.addEventListener('resize', measure)
+
+    return () => {
+      window.removeEventListener('resize', measure)
+      window.visualViewport?.removeEventListener('resize', measure)
+      probe.remove()
+    }
+  }, [])
 
   const createTaskAndOpen = () => {
     const fallbackSubjectId =
@@ -178,8 +226,85 @@ export function AppLayout() {
     setTaskDialogRequest({ mode: 'add', subjectId: fallbackSubjectId, date })
   }
 
-  const openTaskPreview = (taskId: string) => {
-    setTaskDialogRequest({ mode: 'preview', taskId })
+  const openTaskPreview = (taskId: string, opts?: { autoEdit?: boolean; autoCloseAfterComplete?: boolean; autoTimer?: boolean }) => {
+    setTaskDialogRequest({ mode: 'preview', taskId, ...opts })
+  }
+
+  const openContextMenu = (e: ReactMouseEvent, items: ContextMenuItem[]) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setContextMenu({ x: e.clientX, y: e.clientY, items })
+  }
+
+  const buildSidebarTaskMenuItems = (taskId: string) => {
+    const task = tasks.find((it) => it.id === taskId)
+    if (!task) return null
+    const subjectColor = subjects.find((s) => s.id === task.subjectId)?.color ?? '#94a3b8'
+    const items: ContextMenuItem[] = [
+      { key: 'timer', label: '타이머', onSelect: () => openTaskPreview(taskId, { autoTimer: true }) },
+      { key: 'copy', label: '일정 복사', onSelect: () => copyTaskToClipboard(task) },
+      { key: 'edit', label: '편집', onSelect: () => openTaskPreview(taskId, { autoEdit: true }) },
+      {
+        key: 'delete',
+        label: '삭제',
+        danger: true,
+        onSelect: async () => {
+          const ok = await confirm({
+            title: '일정을 삭제할까요?',
+            message: '이 작업은 되돌릴 수 없어요.',
+            confirmLabel: '삭제',
+            danger: true,
+          })
+          if (!ok) return
+          deleteTask(taskId)
+        },
+      },
+    ]
+    return { items, header: { title: task.title || '제목 없음', color: subjectColor } }
+  }
+
+  const openSidebarTaskMenu = (e: ReactMouseEvent, taskId: string) => {
+    const menu = buildSidebarTaskMenuItems(taskId)
+    if (!menu) return
+    e.preventDefault()
+    e.stopPropagation()
+    setContextMenu({ x: e.clientX, y: e.clientY, ...menu })
+  }
+
+  const openSidebarTaskMenuAt = (x: number, y: number, taskId: string) => {
+    const menu = buildSidebarTaskMenuItems(taskId)
+    if (!menu) return
+    setContextMenu({ x, y, ...menu })
+  }
+
+  const openSidebarUnassignedMenu = (e: ReactMouseEvent) => {
+    const items: ContextMenuItem[] = [{ key: 'add', label: '일정 추가', icon: <IconPlus className="h-4 w-4" />, onSelect: createTaskAndOpen }]
+    if (getTaskClipboard()) {
+      items.push({
+        key: 'paste',
+        label: '일정 붙여넣기',
+        onSelect: () => {
+          pasteTaskFromClipboard(addTask, { date: '' })
+        },
+      })
+    }
+    openContextMenu(e, items)
+  }
+
+  const openSidebarDayUnscheduledMenu = (e: ReactMouseEvent) => {
+    const items: ContextMenuItem[] = [
+      { key: 'add', label: '일정 추가', icon: <IconPlus className="h-4 w-4" />, onSelect: () => createTaskAndOpenForDay(dayPageDate) },
+    ]
+    if (getTaskClipboard()) {
+      items.push({
+        key: 'paste',
+        label: '일정 붙여넣기',
+        onSelect: () => {
+          pasteTaskFromClipboard(addTask, { date: dayPageDate, plannedStartTime: undefined })
+        },
+      })
+    }
+    openContextMenu(e, items)
   }
 
   useEffect(() => {
@@ -246,8 +371,7 @@ export function AppLayout() {
   }, [tasks, activeExamId, dayPageDate])
 
   return (
-    <ConfirmDialogProvider>
-      <TaskDialogContext.Provider
+    <TaskDialogContext.Provider
         value={{
           openTaskAdd: (input) => setTaskDialogRequest({ mode: 'add', ...input }),
           openTaskPreview: (taskId, opts) => setTaskDialogRequest({ mode: 'preview', taskId, ...opts }),
@@ -256,7 +380,14 @@ export function AppLayout() {
         }}
       >
       <SidebarToggleContext.Provider value={{ open: sidebarOpen, toggle: () => setSidebarOpen((cur) => !cur) }}>
-        <div className="h-full [--bottom-nav-h:72px]">
+        <div
+          className="h-full [--bottom-nav-h:72px]"
+          style={{
+            ['--bottom-nav-safe-gap' as string]: hasBottomSafeArea ? '12px' : '0px',
+            ['--bottom-safe-inset' as string]: hasBottomSafeArea ? 'env(safe-area-inset-bottom)' : '0px',
+            ['--bottom-overlay-offset' as string]: 'calc(var(--bottom-safe-inset, 0px) + var(--bottom-nav-safe-gap, 0px))',
+          }}
+        >
           <div
             className={`grid h-full w-full grid-cols-1 ${
               sidebarOpen ? 'md:grid-cols-[260px_1fr]' : 'md:grid-cols-[72px_1fr]'
@@ -312,13 +443,17 @@ export function AppLayout() {
                 </div>
                 <div
                   className="min-h-0 flex-1 border-t border-slate-100 p-2"
+                  onContextMenu={openSidebarUnassignedMenu}
                   onDragOver={(e) => {
                     e.preventDefault()
+                    syncTaskDropEffect(e)
                   }}
                   onDrop={(e) => {
                     e.preventDefault()
-                    const taskId = e.dataTransfer.getData('text/emma-task-id')
-                    if (taskId) updateTask(taskId, { date: '' })
+                    const taskId = getTaskDragId(e.dataTransfer)
+                    if (!taskId) return
+                    if (e.altKey) duplicateTask(taskId, { date: '' })
+                    else updateTask(taskId, { date: '' })
                   }}
                 >
                   <div className="h-full min-h-0 overflow-y-auto overscroll-contain pr-1">
@@ -356,12 +491,16 @@ export function AppLayout() {
                                     <button
                                       key={t.id}
                                       type="button"
-                                      onClick={() => openTaskPreview(t.id)}
+                                      onClick={() => {
+                                        if (taskTouchContextMenu.shouldIgnoreClick()) return
+                                        openTaskPreview(t.id)
+                                      }}
+                                      onContextMenu={(e) => openSidebarTaskMenu(e, t.id)}
                                       draggable
                                       onDragStart={(e) => {
-                                        e.dataTransfer.setData('text/emma-task-id', t.id)
-                                        e.dataTransfer.effectAllowed = 'move'
+                                        setTaskDragData(e.dataTransfer, t.id)
                                       }}
+                                      {...taskTouchContextMenu.bind(`sidebar-unassigned:${t.id}`, ({ x, y }) => openSidebarTaskMenuAt(x, y, t.id))}
                                       className="block min-w-0 select-none rounded-lg px-3 py-2 text-left text-[12px] leading-tight"
                                       style={{ background: bg, color: textColor }}
                                     >
@@ -415,11 +554,17 @@ export function AppLayout() {
                 <div
                   className="min-h-0 flex-1 border-t border-slate-100 p-2"
                   data-unscheduled-dropzone="true"
-                  onDragOver={(e) => e.preventDefault()}
+                  onContextMenu={openSidebarDayUnscheduledMenu}
+                  onDragOver={(e) => {
+                    e.preventDefault()
+                    syncTaskDropEffect(e)
+                  }}
                   onDrop={(e) => {
                     e.preventDefault()
-                    const taskId = e.dataTransfer.getData('text/emma-task-id')
-                    if (taskId) updateTask(taskId, { plannedStartTime: undefined })
+                    const taskId = getTaskDragId(e.dataTransfer)
+                    if (!taskId) return
+                    if (e.altKey) duplicateTask(taskId, { plannedStartTime: undefined })
+                    else updateTask(taskId, { plannedStartTime: undefined })
                   }}
                 >
                   <div className="h-full min-h-0 overflow-y-auto overscroll-contain pr-1">
@@ -475,12 +620,16 @@ export function AppLayout() {
                                       <button
                                         key={t.id}
                                         type="button"
-                                        onClick={() => openTaskPreview(t.id)}
+                                        onClick={() => {
+                                          if (taskTouchContextMenu.shouldIgnoreClick()) return
+                                          openTaskPreview(t.id)
+                                        }}
+                                        onContextMenu={(e) => openSidebarTaskMenu(e, t.id)}
                                         draggable
                                         onDragStart={(e) => {
-                                          e.dataTransfer.setData('text/emma-task-id', t.id)
-                                          e.dataTransfer.effectAllowed = 'move'
+                                          setTaskDragData(e.dataTransfer, t.id)
                                         }}
+                                        {...taskTouchContextMenu.bind(`sidebar-day:${t.id}`, ({ x, y }) => openSidebarTaskMenuAt(x, y, t.id))}
                                         className={`block w-full min-w-0 select-none rounded-lg px-3 py-2 text-left text-[12px] leading-tight shadow-sm ${
                                           isCompleted ? 'saturate-[0.85] brightness-[0.97]' : ''
                                         }`}
@@ -620,14 +769,17 @@ export function AppLayout() {
               </div>
             ) : null}
             </aside>
-            <main className="min-h-0 overflow-auto px-0 py-0 pb-[calc(var(--bottom-nav-h)+env(safe-area-inset-bottom))] md:p-3 md:pb-3">
+            <main className="min-h-0 overflow-auto px-0 py-0 pb-[calc(var(--bottom-nav-h)+var(--bottom-overlay-offset,0px))] md:p-3 md:pb-3">
               <Outlet />
             </main>
           </div>
 
           {!hideBottom ? (
-            <div className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/95 shadow-[0_-12px_40px_rgba(15,23,42,0.08)] backdrop-blur md:hidden">
-              <div style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
+            <div
+              className="fixed inset-x-0 z-30 border-t border-slate-200 bg-white/95 shadow-[0_-12px_40px_rgba(15,23,42,0.08)] backdrop-blur md:hidden"
+              style={{ bottom: 'var(--bottom-overlay-offset, 0px)' }}
+            >
+              <div>
                 <div className="mx-auto grid max-w-xl grid-cols-5 px-2 pb-2 pt-2">
 	                  <BottomNavItem
 	                    to="/"
@@ -692,6 +844,7 @@ export function AppLayout() {
             </div>
           ) : null}
           <TaskDialog />
+          <ContextMenu menu={contextMenu} onClose={() => setContextMenu(null)} />
         </div>
       </SidebarToggleContext.Provider>
 
@@ -712,7 +865,6 @@ export function AppLayout() {
           }}
         />
       </TaskDialogContext.Provider>
-    </ConfirmDialogProvider>
   )
 }
 

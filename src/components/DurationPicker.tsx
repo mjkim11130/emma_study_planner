@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { useEscapeKey } from '../lib/useEscapeKey'
 
 const clampInt = (n: number, min: number, max: number) => Math.max(min, Math.min(max, Math.trunc(n)))
 
@@ -71,14 +72,7 @@ export function DurationPickerButton({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
-  useEffect(() => {
-    if (!open) return
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false)
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [open])
+  useEscapeKey(open, () => setOpen(false), 90)
 
   useEffect(() => {
     if (!open) return

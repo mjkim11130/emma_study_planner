@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { useEscapeKey } from '../lib/useEscapeKey'
 
 const pad2 = (n: number) => String(n).padStart(2, '0')
 
@@ -108,18 +109,13 @@ export function TaskTimerModal({ plannedSeconds, subjectName, taskTitle, subject
     return { phase: 'fill' as const, progress: cycle === 0 ? 0 : cycle / totalSeconds }
   }, [elapsedSeconds, totalSeconds])
 
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return
-      if (running) {
-        setRunning(false)
-        startWallClockRef.current = null
-      }
-      onClose()
+  useEscapeKey(true, () => {
+    if (running) {
+      setRunning(false)
+      startWallClockRef.current = null
     }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [onClose, running])
+    onClose()
+  }, 95)
 
   useEffect(() => {
     if (!running) {

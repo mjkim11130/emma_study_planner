@@ -1,5 +1,6 @@
 import { createPortal } from 'react-dom'
 import type { ReactNode } from 'react'
+import { useEscapeKey } from '../lib/useEscapeKey'
 
 type TaskDialogShellProps = {
   open: boolean
@@ -11,6 +12,8 @@ type TaskDialogShellProps = {
 }
 
 export function TaskDialogShell({ open, onClose, titleRow, children, footer, onBackdropClick }: TaskDialogShellProps) {
+  useEscapeKey(open, onClose, 50)
+
   if (!open || typeof document === 'undefined') return null
 
   return createPortal(

@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { ko } from 'date-fns/locale'
 import { format, parseISO } from 'date-fns'
@@ -13,6 +13,7 @@ import { useTaskDialog } from './TaskDialogContext'
 import { useConfirmDialog } from './ConfirmDialog'
 import { buildTimeSummaryNode, formatDurationPreciseKo } from '../lib/taskTimeSummary'
 import { formatDday } from '../lib/dday'
+import { useEscapeKey } from '../lib/useEscapeKey'
 
 const DRAFT_TASK_ID = '__draft__task__'
 
@@ -463,6 +464,61 @@ export function TaskDialog() {
   const hasPreviewCompare = Boolean(previewActualSummary)
   const hasPreviewMeta = Boolean(isEditingPreview || previewHeadlineTimes.length || previewTask?.dueDate)
 
+  useEscapeKey(Boolean(isEditingPreview && datePickerField), () => setDatePickerField(null), 75)
+  useEscapeKey(Boolean(isEditingPreview && editExitConfirmOpen), () => setEditExitConfirmOpen(false), 80)
+
+  const submitPreviewEdit = () => {
+    if (!previewTask) return
+    setEditWarningMessage(null)
+    const draft = editTitleDraft.trim()
+    const original = (editTitleOriginalRef.current?.taskId === previewTask.id ? editTitleOriginalRef.current.title : previewTask.title ?? '').trim()
+    const addFallbackTitle = buildNextTaskTitle((previewSubject?.name ?? '').trim(), tasks)
+    const nextTitle = isAddMode ? draft || addFallbackTitle : draft || original || (previewSubject?.name ?? '').trim()
+    if (!previewTask.recordCompleteOnly) {
+      // start-only completion is allowed; only validate when both exist.
+    }
+    const start = hmToMinutes(previewTask.actualStartTime ?? null)
+    const end = hmToMinutes(previewTask.actualEndTime ?? null)
+    if (start !== null && end !== null) {
+      if (end === start) {
+        setEditValidationMessage('완료 종료시간을 시작시간과 동일하게 설정할 수 없어요.')
+        return
+      }
+      const diffMin = end > start ? end - start : end + 24 * 60 - start
+      if (diffMin > 10 * 60) {
+        setEditValidationMessage('완료 시작/종료 간격이 10시간을 넘어서 저장할 수 없어요.')
+        return
+      }
+      if (end < start) setEditWarningMessage('종료시간이 시작시간보다 빨라서, 다음날까지 진행한 것으로 계산돼요.')
+    }
+    setEditValidationMessage(null)
+    if (isAddMode) {
+      const createdId = commitAddDraft({ ...previewTask, title: nextTitle })
+      if (!createdId) return
+      setEditTaskId(null)
+      setEditDraft(null)
+      close()
+      return
+    }
+    if (!storedPreviewTask) return
+    commitEditDraft(storedPreviewTask, { ...(previewTask as StudyTask), title: nextTitle })
+    setEditTaskId(null)
+    setEditDraft(null)
+    if (autoCloseAfterCompleteTaskId === previewTask.id) setAutoCloseAfterCompleteTaskId(null)
+  }
+
+  const handleTitleInputKeyDown = (e: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== 'Enter') return
+    if (e.shiftKey || e.altKey || e.ctrlKey || e.metaKey) return
+    e.preventDefault()
+  }
+
+  const handleTitleInputKeyUp = (e: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== 'Enter') return
+    if (e.shiftKey || e.altKey || e.ctrlKey || e.metaKey || e.repeat) return
+    submitPreviewEdit()
+  }
+
   if (!request || !previewTask) return null
 
   return (
@@ -596,6 +652,8 @@ export function TaskDialog() {
                     <input
                       value={editTitleDraft}
                       onChange={(e) => setEditTitleDraft(e.target.value)}
+                      onKeyDown={handleTitleInputKeyDown}
+                      onKeyUp={handleTitleInputKeyUp}
                       placeholder={editTitleSample || '제목 추가'}
                       className="w-full bg-transparent text-2xl font-semibold leading-tight text-slate-900 outline-none placeholder:text-slate-400 md:text-[30px]"
                     />
@@ -955,45 +1013,7 @@ export function TaskDialog() {
             <div className="grid grid-cols-2 gap-3">
               <button
                 type="button"
-                onClick={() => {
-                  if (!previewTask) return
-                  setEditWarningMessage(null)
-                  const draft = editTitleDraft.trim()
-                  const original = (editTitleOriginalRef.current?.taskId === previewTask.id ? editTitleOriginalRef.current.title : previewTask.title ?? '').trim()
-                  const addFallbackTitle = buildNextTaskTitle((previewSubject?.name ?? '').trim(), tasks)
-                  const nextTitle = isAddMode ? draft || addFallbackTitle : draft || original || (previewSubject?.name ?? '').trim()
-                  if (!previewTask.recordCompleteOnly) {
-                    // start-only completion is allowed; only validate when both exist.
-                  }
-                  const start = hmToMinutes(previewTask.actualStartTime ?? null)
-                  const end = hmToMinutes(previewTask.actualEndTime ?? null)
-                  if (start !== null && end !== null) {
-                    if (end === start) {
-                      setEditValidationMessage('완료 종료시간을 시작시간과 동일하게 설정할 수 없어요.')
-                      return
-                    }
-                    const diffMin = end > start ? end - start : end + 24 * 60 - start
-                    if (diffMin > 10 * 60) {
-                      setEditValidationMessage('완료 시작/종료 간격이 10시간을 넘어서 저장할 수 없어요.')
-                      return
-                    }
-                    if (end < start) setEditWarningMessage('종료시간이 시작시간보다 빨라서, 다음날까지 진행한 것으로 계산돼요.')
-                  }
-                  setEditValidationMessage(null)
-                  if (isAddMode) {
-                    const createdId = commitAddDraft({ ...previewTask, title: nextTitle })
-                    if (!createdId) return
-                    setEditTaskId(null)
-                    setEditDraft(null)
-                    close()
-                    return
-                  }
-                  if (!storedPreviewTask) return
-                  commitEditDraft(storedPreviewTask, { ...(previewTask as StudyTask), title: nextTitle })
-                  setEditTaskId(null)
-                  setEditDraft(null)
-                  if (autoCloseAfterCompleteTaskId === previewTask.id) setAutoCloseAfterCompleteTaskId(null)
-                }}
+                onClick={submitPreviewEdit}
                 className="inline-flex h-10 w-full items-center justify-center rounded-xl bg-black/80 px-3 py-2 text-sm font-medium text-white transition hover:bg-black/70 disabled:bg-black/30"
               >
                 {isAddMode ? '등록' : '완료'}

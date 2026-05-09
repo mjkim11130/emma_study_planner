@@ -12,6 +12,9 @@ import { MobileTopBar } from '../components/MobileTopBar'
 import { IconCalendarMonth, IconCalendarWeek, IconPlus } from '../components/NavIcons'
 import { useTaskDialog } from '../components/TaskDialogContext'
 import { TimePickerModal } from '../components/TimePicker'
+import { getTaskDragId, setTaskDragData, syncTaskDropEffect } from '../lib/taskDrag'
+import { buildClipboardTaskAtTime, copyTaskToClipboard, pasteTaskFromClipboard } from '../lib/taskClipboard'
+import { useTouchContextMenu } from '../lib/useTouchContextMenu'
 
 function UnscheduledBubbleIcon() {
   return (
@@ -197,44 +200,78 @@ export function DayDetailView() {
   const subjects = usePlannerStore((s) => s.subjects)
   const allTasks = usePlannerStore((s) => s.tasks)
   const tasks = useMemo(() => allTasks.filter((t) => t.examId === activeExamId && t.date === date), [allTasks, activeExamId, date])
+  const addTask = usePlannerStore((s) => s.addTask)
   const updateTask = usePlannerStore((s) => s.updateTask)
+  const duplicateTask = usePlannerStore((s) => s.duplicateTask)
   const deleteTask = usePlannerStore((s) => s.deleteTask)
   const { openTaskAdd, openTaskPreview } = useTaskDialog()
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
+  const taskTouchContextMenu = useTouchContextMenu()
   const openContextMenu = (e: ReactMouseEvent, items: ContextMenuItem[]) => {
     e.preventDefault()
     e.stopPropagation()
     setContextMenu({ x: e.clientX, y: e.clientY, items })
   }
-  const openDayTaskMenu = (e: ReactMouseEvent, taskId: string) => {
-    openContextMenu(e, [
-      { key: 'timer', label: '타이머', onSelect: () => openTaskPreview(taskId, { autoTimer: true }) },
-      { key: 'edit', label: '편집', onSelect: () => openTaskPreview(taskId, { autoEdit: true }) },
-      {
-        key: 'delete',
-        label: '삭제',
-        danger: true,
-        onSelect: async () => {
-          const ok = await confirm({
-            title: '일정을 삭제할까요?',
-            message: '이 작업은 되돌릴 수 없어요.',
-            confirmLabel: '삭제',
-            danger: true,
-          })
-          if (!ok) return
-          deleteTask(taskId)
+  const openContextMenuAt = (x: number, y: number, items: ContextMenuItem[]) => {
+    setContextMenu({ x, y, items })
+  }
+  const buildDayTaskMenuItems = (taskId: string) => {
+    const task = allTasks.find((it) => it.id === taskId)
+    return {
+      header: { title: task?.title || '제목 없음', color: subjects.find((s) => s.id === task?.subjectId)?.color ?? '#94a3b8' },
+      items: [
+        { key: 'timer', label: '타이머', onSelect: () => openTaskPreview(taskId, { autoTimer: true }) },
+        ...(task ? [{ key: 'copy', label: '일정 복사', onSelect: () => copyTaskToClipboard(task) }] : []),
+        { key: 'edit', label: '편집', onSelect: () => openTaskPreview(taskId, { autoEdit: true }) },
+        {
+          key: 'delete',
+          label: '삭제',
+          danger: true,
+          onSelect: async () => {
+            const ok = await confirm({
+              title: '일정을 삭제할까요?',
+              message: '이 작업은 되돌릴 수 없어요.',
+              confirmLabel: '삭제',
+              danger: true,
+            })
+            if (!ok) return
+            deleteTask(taskId)
+          },
         },
-      },
-    ])
+      ] satisfies ContextMenuItem[],
+    }
+  }
+
+  const openDayTaskMenu = (e: ReactMouseEvent, taskId: string) => {
+    const menu = buildDayTaskMenuItems(taskId)
+    e.preventDefault()
+    e.stopPropagation()
+    setContextMenu({ x: e.clientX, y: e.clientY, ...menu })
+  }
+
+  const openDayTaskMenuAt = (x: number, y: number, taskId: string) => {
+    setContextMenu({ x, y, ...buildDayTaskMenuItems(taskId) })
   }
   const openDayTimelineMenu = (e: ReactMouseEvent, startMin: number) => {
-    openContextMenu(e, [
+    const items: ContextMenuItem[] = [
       {
         key: 'add',
         label: '일정 추가',
         icon: <IconPlus className="h-4 w-4" />,
         onSelect: () => openTaskAdd({ date, plannedStartTime: minutesToHm(startMin), plannedSeconds: 0 }),
       },
+    ]
+    const clipboardTask = buildClipboardTaskAtTime(minutesToHm(startMin))
+    if (clipboardTask) {
+      items.push({
+        key: 'paste',
+        label: '일정 붙여넣기',
+        onSelect: () => {
+          pasteTaskFromClipboard(addTask, { ...clipboardTask, date })
+        },
+      })
+    }
+    items.push(
       { key: 'month', label: '월간 캘린더 보기', icon: <IconCalendarMonth className="h-4 w-4" />, onSelect: () => navigate(`/?month=${encodeURIComponent(date.slice(0, 7))}`) },
       {
         key: 'week',
@@ -243,7 +280,39 @@ export function DayDetailView() {
         onSelect: () =>
           navigate(`/week?weekStart=${encodeURIComponent(format(startOfWeek(ymdToDate(date), { weekStartsOn: 1 }), 'yyyy-MM-dd'))}`),
       },
-    ])
+    )
+    openContextMenu(e, items)
+  }
+  const openDayTimelineMenuAt = (x: number, y: number, startMin: number) => {
+    const items: ContextMenuItem[] = [
+      {
+        key: 'add',
+        label: '일정 추가',
+        icon: <IconPlus className="h-4 w-4" />,
+        onSelect: () => openTaskAdd({ date, plannedStartTime: minutesToHm(startMin), plannedSeconds: 0 }),
+      },
+    ]
+    const clipboardTask = buildClipboardTaskAtTime(minutesToHm(startMin))
+    if (clipboardTask) {
+      items.push({
+        key: 'paste',
+        label: '일정 붙여넣기',
+        onSelect: () => {
+          pasteTaskFromClipboard(addTask, { ...clipboardTask, date })
+        },
+      })
+    }
+    items.push(
+      { key: 'month', label: '월간 캘린더 보기', icon: <IconCalendarMonth className="h-4 w-4" />, onSelect: () => navigate(`/?month=${encodeURIComponent(date.slice(0, 7))}`) },
+      {
+        key: 'week',
+        label: '주간 캘린더 보기',
+        icon: <IconCalendarWeek className="h-4 w-4" />,
+        onSelect: () =>
+          navigate(`/week?weekStart=${encodeURIComponent(format(startOfWeek(ymdToDate(date), { weekStartsOn: 1 }), 'yyyy-MM-dd'))}`),
+      },
+    )
+    openContextMenuAt(x, y, items)
   }
   const [unscheduledOpen, setUnscheduledOpen] = useState(false)
   const [timelineTimePickerOpen, setTimelineTimePickerOpen] = useState(false)
@@ -530,6 +599,40 @@ export function DayDetailView() {
 
   // listGroups are filtered inside listPanel(mode)
 
+  const duplicateTimelineTaskAt = (taskId: string, kind: TimelineKind, startMin: number, durationMin: number) => {
+    const startHm = minutesToHm(startMin)
+    const endHm = minutesToHm(startMin + durationMin)
+    if (kind === 'actual') {
+      duplicateTask(taskId, {
+        actualStartTime: startHm,
+        actualEndTime: endHm,
+        actualSeconds: undefined,
+        recordCompleteOnly: false,
+        status: 'completed',
+      })
+      return
+    }
+    duplicateTask(taskId, {
+      plannedStartTime: startHm,
+      plannedSeconds: durationMin * 60,
+    })
+  }
+
+  const duplicateTimelineTaskAsUnscheduled = (taskId: string, kind: TimelineKind) => {
+    if (kind === 'actual') {
+      duplicateTask(taskId, {
+        actualStartTime: undefined,
+        actualEndTime: undefined,
+        actualSeconds: undefined,
+        plannedStartTime: undefined,
+        recordCompleteOnly: false,
+        status: 'pending',
+      })
+      return
+    }
+    duplicateTask(taskId, { plannedStartTime: undefined })
+  }
+
   const timelinePanel = (
     <div className="px-4 md:px-3">
       <div data-no-day-swipe={daySwipeBlocked ? 'true' : undefined}>
@@ -541,7 +644,9 @@ export function DayDetailView() {
         onRequestTimePick={(field) => openTimelineTimePicker(field)}
         onOpenTask={(taskId) => openTaskPreview(taskId)}
         onOpenTaskMenu={openDayTaskMenu}
+        onOpenTaskMenuAt={openDayTaskMenuAt}
         onOpenCanvasMenu={openDayTimelineMenu}
+        onOpenCanvasMenuAt={openDayTimelineMenuAt}
         onInteractionLockChange={(locked) => setDaySwipeBlocked(locked)}
         onToggleComplete={(taskId, _kind, nextCompleted) => {
           if (nextCompleted) {
@@ -575,6 +680,8 @@ export function DayDetailView() {
             updateTask(taskId, { plannedStartTime: undefined })
           }
         }}
+        onDuplicateTask={duplicateTimelineTaskAt}
+        onDuplicateTaskAsUnscheduled={duplicateTimelineTaskAsUnscheduled}
         onUpdate={(taskId, kind, startMin, durationMin) => {
           const startHm = minutesToHm(startMin)
           const endHm = minutesToHm(startMin + durationMin)
@@ -591,10 +698,14 @@ export function DayDetailView() {
             updateTask(taskId, { plannedStartTime: startHm, plannedSeconds: durationMin * 60 })
           }
         }}
-        onDropTask={(taskId, startMin) => {
+        onDropTask={(taskId, startMin, copyMode) => {
           const task = tasks.find((x) => x.id === taskId)
           if (!task) return
           // 시간미정 -> 타임라인 배치 시 "소요시간"은 덮어쓰지 않음 (있으면 유지, 없으면 undefined 유지)
+          if (copyMode) {
+            duplicateTask(taskId, { plannedStartTime: minutesToHm(startMin) })
+            return
+          }
           updateTask(taskId, { plannedStartTime: minutesToHm(startMin) })
         }}
         onAddRange={(startMin, endMin) => {
@@ -686,8 +797,12 @@ export function DayDetailView() {
                   <button
                     key={t.id}
                     type="button"
-                    onClick={() => openTaskPreview(t.id)}
+                    onClick={() => {
+                      if (taskTouchContextMenu.shouldIgnoreClick()) return
+                      openTaskPreview(t.id)
+                    }}
                     onContextMenu={(e) => openDayTaskMenu(e, t.id)}
+                    {...taskTouchContextMenu.bind(`day-list:${t.id}`, ({ x, y }) => openDayTaskMenuAt(x, y, t.id))}
                     className={`grid w-full select-none grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 px-2 py-3 text-slate-900 hover:bg-slate-50 ${
                       isCompleted ? 'opacity-75' : ''
                     }`}
@@ -1013,7 +1128,7 @@ export function DayDetailView() {
             <div
               ref={timelineScrollRef}
               className="w-1/3 overflow-y-auto overscroll-contain"
-              style={{ height: 'calc(100dvh - env(safe-area-inset-top) - 120px - var(--bottom-nav-h, 0px))' }}
+              style={{ height: 'calc(100dvh - env(safe-area-inset-top) - 120px - var(--bottom-nav-h, 0px) - var(--bottom-overlay-offset, 0px))' }}
               onScroll={(e) => (scrollTopByTabRef.current.timeline = (e.currentTarget as HTMLDivElement).scrollTop)}
             >
               {timelinePanel}
@@ -1021,7 +1136,7 @@ export function DayDetailView() {
             <div
               ref={plannedScrollRef}
               className="w-1/3 overflow-y-auto overscroll-contain"
-              style={{ height: 'calc(100dvh - env(safe-area-inset-top) - 120px - var(--bottom-nav-h, 0px))' }}
+              style={{ height: 'calc(100dvh - env(safe-area-inset-top) - 120px - var(--bottom-nav-h, 0px) - var(--bottom-overlay-offset, 0px))' }}
               onScroll={(e) => (scrollTopByTabRef.current.planned = (e.currentTarget as HTMLDivElement).scrollTop)}
             >
               {listPanel('planned')}
@@ -1029,7 +1144,7 @@ export function DayDetailView() {
             <div
               ref={completedScrollRef}
               className="w-1/3 overflow-y-auto overscroll-contain"
-              style={{ height: 'calc(100dvh - env(safe-area-inset-top) - 120px - var(--bottom-nav-h, 0px))' }}
+              style={{ height: 'calc(100dvh - env(safe-area-inset-top) - 120px - var(--bottom-nav-h, 0px) - var(--bottom-overlay-offset, 0px))' }}
               onScroll={(e) => (scrollTopByTabRef.current.completed = (e.currentTarget as HTMLDivElement).scrollTop)}
             >
               {listPanel('completed')}
@@ -1078,7 +1193,7 @@ export function DayDetailView() {
           className={`fixed z-40 flex items-start justify-end gap-[10px] md:hidden ${unscheduledDockOrigin}`}
           style={{
             right: '0.375rem',
-            bottom: unscheduledDock.v === 'bottom' ? 'calc(var(--bottom-nav-h, 0px) + env(safe-area-inset-bottom) + 10px)' : undefined,
+            bottom: unscheduledDock.v === 'bottom' ? 'calc(var(--bottom-nav-h, 0px) + var(--bottom-overlay-offset, 0px) + 10px)' : undefined,
             top: unscheduledDock.v === 'top' ? `${topDockY}px` : undefined,
             width: unscheduledOpen ? 'calc(100vw - 0.75rem)' : '138px',
             height: unscheduledOpen ? '173px' : '64px',
@@ -1173,12 +1288,16 @@ export function DayDetailView() {
               <div
                 className="h-[132px] border-t border-white/8 px-3 py-2"
                 data-unscheduled-dropzone="true"
-                onDragOver={(e) => e.preventDefault()}
+                onDragOver={(e) => {
+                  e.preventDefault()
+                  syncTaskDropEffect(e)
+                }}
                 onDrop={(e) => {
                   e.preventDefault()
-                  const taskId = e.dataTransfer.getData('text/emma-task-id')
+                  const taskId = getTaskDragId(e.dataTransfer)
                   if (!taskId) return
-                  updateTask(taskId, { plannedStartTime: undefined })
+                  if (e.altKey) duplicateTask(taskId, { plannedStartTime: undefined })
+                  else updateTask(taskId, { plannedStartTime: undefined })
                 }}
               >
                 {dayUnscheduled.length === 0 ? (
@@ -1222,25 +1341,28 @@ export function DayDetailView() {
 	                                              <button
 	                                                key={t.id}
 	                                            type="button"
-	                                            onClick={() => openTaskPreview(t.id)}
+	                                            onClick={() => {
+	                                              if (taskTouchContextMenu.shouldIgnoreClick()) return
+	                                              openTaskPreview(t.id)
+	                                            }}
                                                 onContextMenu={(e) => openDayTaskMenu(e, t.id)}
+	                                            {...taskTouchContextMenu.bind(`day-bubble:${t.id}`, ({ x, y }) => openDayTaskMenuAt(x, y, t.id))}
 	                                            draggable
 	                                            onDragStart={(e) => {
-                                              e.dataTransfer.setData('text/emma-task-id', t.id)
-                                              e.dataTransfer.effectAllowed = 'move'
+                                              setTaskDragData(e.dataTransfer, t.id)
                                             }}
-                                            className={`w-[33vw] max-w-[190px] select-none rounded-xl border border-black/10 px-3 py-2 text-left text-sm shadow-sm ${onText} ${
+                                            className={`w-[33vw] max-w-[190px] select-none rounded-xl border border-black/10 px-2.5 py-1.5 text-left text-[10px] shadow-sm ${onText} ${
                                               isCompleted ? 'saturate-[0.85] brightness-[0.97]' : ''
                                             }`}
                                             style={{ backgroundColor: bg }}
                                             title="타임라인으로 드래그해서 배치"
                                           >
-                                            <div className="flex items-start justify-between gap-2">
+                                            <div className="flex items-start justify-between gap-1.5">
                                               <div className="min-w-0">
-                                                <div className="flex items-center gap-2">
+                                                <div className="flex items-center gap-1.5">
                                                   <button
                                                     type="button"
-                                                    className="inline-flex h-4 w-4 items-center justify-center opacity-90"
+                                                    className="inline-flex h-3.5 w-3.5 items-center justify-center opacity-90"
                                                     aria-label={isCompleted ? '완료 해제' : '완료 처리'}
                                                     onClick={(e) => {
                                                       e.stopPropagation()
@@ -1260,12 +1382,12 @@ export function DayDetailView() {
                                                     }}
                                                   >
                                                     {isCompleted ? (
-                                                      <svg viewBox="0 0 20 20" className="h-4 w-4" aria-hidden="true">
+                                                      <svg viewBox="0 0 20 20" className="h-3.5 w-3.5" aria-hidden="true">
                                                         <rect x="2.5" y="2.5" width="15" height="15" rx="2.5" fill="none" stroke="currentColor" strokeWidth="2" />
                                                         <path d="M6 10.2l2.3 2.3L14.5 6.6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                                                       </svg>
                                                     ) : (
-                                                      <svg viewBox="0 0 20 20" className="h-4 w-4" aria-hidden="true">
+                                                      <svg viewBox="0 0 20 20" className="h-3.5 w-3.5" aria-hidden="true">
                                                         <rect x="2.5" y="2.5" width="15" height="15" rx="2.5" fill="none" stroke="currentColor" strokeWidth="2" />
                                                       </svg>
                                                     )}
@@ -1305,6 +1427,8 @@ function DayTimeline({
   onUpdate,
   onDropTask,
   onUnscheduleTask,
+  onDuplicateTask,
+  onDuplicateTaskAsUnscheduled,
   onToggleComplete,
   onAddRange,
   viewStartMin,
@@ -1313,13 +1437,17 @@ function DayTimeline({
   onRequestTimePick,
   onOpenTask,
   onOpenTaskMenu,
+  onOpenTaskMenuAt,
   onOpenCanvasMenu,
+  onOpenCanvasMenuAt,
   onInteractionLockChange,
 }: {
   items: TimelineItem[]
   onUpdate: (taskId: string, kind: TimelineKind, startMin: number, durationMin: number) => void
-  onDropTask: (taskId: string, startMin: number) => void
+  onDropTask: (taskId: string, startMin: number, copyMode: boolean) => void
   onUnscheduleTask: (taskId: string, kind: TimelineKind) => void
+  onDuplicateTask: (taskId: string, kind: TimelineKind, startMin: number, durationMin: number) => void
+  onDuplicateTaskAsUnscheduled: (taskId: string, kind: TimelineKind) => void
   onToggleComplete: (taskId: string, kind: TimelineKind, nextCompleted: boolean) => void
   onAddRange: (startMin: number, endMin: number) => void
   viewStartMin: number
@@ -1328,7 +1456,9 @@ function DayTimeline({
   onRequestTimePick: (field: 'start' | 'end') => void
   onOpenTask: (taskId: string) => void
   onOpenTaskMenu?: (e: ReactMouseEvent, taskId: string) => void
+  onOpenTaskMenuAt?: (x: number, y: number, taskId: string) => void
   onOpenCanvasMenu?: (e: ReactMouseEvent, startMin: number) => void
+  onOpenCanvasMenuAt?: (x: number, y: number, startMin: number) => void
   onInteractionLockChange?: (locked: boolean) => void
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null)
@@ -1374,6 +1504,9 @@ function DayTimeline({
     lastY: number
     originStart: number
     originDur: number
+    currentStart: number
+    currentDur: number
+    copyMode: boolean
     moved: boolean
     outside: boolean
   } | null>(null)
@@ -1531,6 +1664,9 @@ function DayTimeline({
       lastY: e.clientY,
       originStart: it.startMin,
       originDur: it.durationMin,
+      currentStart: it.startMin,
+      currentDur: it.durationMin,
+      copyMode: Boolean(e.pointerType !== 'touch' && e.altKey && mode === 'move'),
       moved: false,
       outside: false,
     })
@@ -1553,7 +1689,6 @@ function DayTimeline({
       const pending = pendingRef.current
       if (!pending || pending.pointerId !== pointerId) return
       pending.started = true
-      beginDrag(e, id, kind, mode)
     }, 260)
     pendingRef.current = { pointerId, id, kind, mode, startX, startY, started: false, timeoutId }
   }
@@ -1587,11 +1722,34 @@ function DayTimeline({
         if (!active) setInteractionLocked(false)
       }
     }
+    if (pendingRange.pointerId === e.pointerId && pendingRange.started && !rangeSelect) {
+      const dx = e.clientX - pendingRange.startX
+      const dy = e.clientY - pendingRange.startY
+      if (Math.hypot(dx, dy) <= 8) return
+      if (!containerRef.current) return
+      setRangeSelect({ pointerId: e.pointerId, startMin: pendingRange.startMin, endMin: pendingRange.startMin + 10, active: true })
+      containerRef.current.style.touchAction = 'none'
+      try {
+        containerRef.current.setPointerCapture(e.pointerId)
+      } catch {
+        // ignore
+      }
+      startDragScrollStop()
+      return
+    }
     const pending = pendingRef.current
     if (pending && pending.pointerId === e.pointerId && !pending.started) {
       const dx = e.clientX - pending.startX
       const dy = e.clientY - pending.startY
       if (Math.hypot(dx, dy) > 8) cancelPending()
+      return
+    }
+    if (pending && pending.pointerId === e.pointerId && pending.started) {
+      const dx = e.clientX - pending.startX
+      const dy = e.clientY - pending.startY
+      if (Math.hypot(dx, dy) <= 8) return
+      cancelPending()
+      beginDrag(e, pending.id, pending.kind, pending.mode)
       return
     }
     if (!active) return
@@ -1609,15 +1767,40 @@ function DayTimeline({
       const maxStart = snap10(Math.max(startMin, endMin - active.originDur))
       const nextStart = Math.min(maxStart, Math.max(startMin, nextStartRaw))
       onUpdate(active.id, active.kind, nextStart, active.originDur)
+      setActive((cur) =>
+        cur
+          ? {
+              ...cur,
+              moved,
+              lastX: e.clientX,
+              lastY: e.clientY,
+              outside,
+              currentStart: nextStart,
+              currentDur: cur.originDur,
+              copyMode: Boolean(e.pointerType !== 'touch' && e.altKey),
+            }
+          : cur,
+      )
     } else {
       const nextDurRaw = Math.max(30, snap10(active.originDur + deltaMinRaw))
       const maxDur = Math.max(30, snap10(endMin - active.originStart))
       const nextDur = Math.min(maxDur, nextDurRaw)
       onUpdate(active.id, active.kind, active.originStart, nextDur)
+      setActive((cur) =>
+        cur
+          ? {
+              ...cur,
+              moved,
+              lastX: e.clientX,
+              lastY: e.clientY,
+              outside,
+              currentStart: cur.originStart,
+              currentDur: nextDur,
+              copyMode: false,
+            }
+          : cur,
+      )
     }
-    if (moved !== active.moved) setActive((cur) => (cur ? { ...cur, moved } : cur))
-    if (active.lastX !== e.clientX || active.lastY !== e.clientY) setActive((cur) => (cur ? { ...cur, lastX: e.clientX, lastY: e.clientY } : cur))
-    if (outside !== active.outside) setActive((cur) => (cur ? { ...cur, outside } : cur))
   }
 
   const handlePointerUp = (e?: React.PointerEvent) => {
@@ -1628,11 +1811,26 @@ function DayTimeline({
         onOpenTask(pending.id)
         return
       }
+      if (pending && pending.pointerId === e.pointerId && pending.started) {
+        cancelPending()
+        onOpenTaskMenuAt?.(e.clientX, e.clientY, pending.id)
+        setInteractionLocked(false)
+        return
+      }
     }
     cancelPending()
     if (rangePressRef.current.timeoutId) {
       window.clearTimeout(rangePressRef.current.timeoutId)
       rangePressRef.current = { timeoutId: null, pointerId: -1, startX: 0, startY: 0, started: false, startMin: 0 }
+    }
+    if (e && rangePressRef.current.pointerId === e.pointerId && rangePressRef.current.started && !rangeSelect) {
+      const pending = rangePressRef.current
+      rangePressRef.current = { timeoutId: null, pointerId: -1, startX: 0, startY: 0, started: false, startMin: 0 }
+      if (containerRef.current) containerRef.current.style.touchAction = ''
+      stopDragScrollStop()
+      setInteractionLocked(false)
+      onOpenCanvasMenuAt?.(e.clientX, e.clientY, pending.startMin)
+      return
     }
     if (e && rangeSelect && rangeSelect.pointerId === e.pointerId) {
       const cur = rangeSelect
@@ -1648,7 +1846,14 @@ function DayTimeline({
         onOpenTask(active.id)
       } else {
         const el = document.elementFromPoint(active.lastX, active.lastY)
-        if (el && (el as HTMLElement).closest('[data-unscheduled-dropzone="true"]')) onUnscheduleTask(active.id, active.kind)
+        const droppedToUnscheduled = Boolean(el && (el as HTMLElement).closest('[data-unscheduled-dropzone="true"]'))
+        if (active.copyMode) {
+          onUpdate(active.id, active.kind, active.originStart, active.originDur)
+          if (droppedToUnscheduled) onDuplicateTaskAsUnscheduled(active.id, active.kind)
+          else onDuplicateTask(active.id, active.kind, active.currentStart, active.currentDur)
+        } else if (droppedToUnscheduled) {
+          onUnscheduleTask(active.id, active.kind)
+        }
       }
     }
     if (containerRef.current) containerRef.current.style.touchAction = ''
@@ -1691,7 +1896,7 @@ function DayTimeline({
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault()
-    const taskId = e.dataTransfer.getData('text/emma-task-id')
+    const taskId = getTaskDragId(e.dataTransfer)
     if (!taskId) return
     const el = containerRef.current
     if (!el) return
@@ -1699,7 +1904,7 @@ function DayTimeline({
     const yInViewport = e.clientY - rect.top
     const minutesRaw = yInViewport / pxPerMin
     const dropStart = snap10(startMin + minutesRaw)
-    onDropTask(taskId, dropStart)
+    onDropTask(taskId, dropStart, e.altKey)
   }
 
   const dragGhost = useMemo(() => {
@@ -1737,16 +1942,7 @@ function DayTimeline({
               const pending = rangePressRef.current
               if (pending.pointerId !== e.pointerId) return
               pending.started = true
-              setRangeSelect({ pointerId: e.pointerId, startMin: pending.startMin, endMin: pending.startMin + 10, active: true })
-              if (containerRef.current) {
-                containerRef.current.style.touchAction = 'none'
-                try {
-                  containerRef.current.setPointerCapture(e.pointerId)
-                } catch {
-                  // ignore
-                }
-              }
-              startDragScrollStop()
+              pending.timeoutId = null
             }, 320),
             pointerId: e.pointerId,
             startX: e.clientX,
@@ -1755,7 +1951,10 @@ function DayTimeline({
             startMin: at,
           }
         }}
-        onDragOver={(e) => e.preventDefault()}
+        onDragOver={(e) => {
+          e.preventDefault()
+          syncTaskDropEffect(e)
+        }}
         onDrop={handleDrop}
         onContextMenu={(e) => {
           const target = e.target as HTMLElement | null

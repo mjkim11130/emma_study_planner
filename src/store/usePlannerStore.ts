@@ -2,7 +2,33 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { randomId } from '../lib/ids'
 import { addSecondsToHm, durationSecondsFromHmRange } from '../lib/time'
-import type { Exam, StudyTask, Subject } from './types'
+import type { Exam, StudyTask, StudyTaskStatus, Subject } from './types'
+
+type ImportedSeasonSubject = {
+  sourceId: string
+  name: string
+  color: string
+  archived?: boolean
+  isRest?: boolean
+  createdAt?: string
+}
+
+type ImportedSeasonTask = {
+  sourceSubjectId: string
+  title: string
+  date?: string
+  dueDate?: string
+  plannedStartTime?: string
+  plannedSeconds: number
+  actualStartTime?: string
+  actualEndTime?: string
+  actualSeconds?: number
+  recordCompleteOnly?: boolean
+  status?: StudyTaskStatus
+  memo?: string
+  createdAt?: string
+  updatedAt?: string
+}
 
 type PlannerState = {
   exams: Exam[]
@@ -33,10 +59,19 @@ type PlannerState = {
     actualEndTime?: string
     actualSeconds?: number
     recordCompleteOnly?: boolean
+    memo?: string
     examId?: string
   }) => string
+  duplicateTask: (id: string, patch?: Partial<Omit<StudyTask, 'id' | 'createdAt' | 'updatedAt'>>) => string | null
   updateTask: (id: string, patch: Partial<Omit<StudyTask, 'id' | 'createdAt'>>) => void
   deleteTask: (id: string) => void
+  replaceSeasonData: (input: {
+    examId: string
+    subjects: ImportedSeasonSubject[]
+    tasks: ImportedSeasonTask[]
+    subjectOrderSourceIds?: string[]
+    lastUsedSourceSubjectId?: string | null
+  }) => void
 }
 
 function computeActualSeconds(startTime?: string, endTime?: string) {
@@ -211,6 +246,7 @@ export const usePlannerStore = create<PlannerState>()(
         actualEndTime,
         actualSeconds,
         recordCompleteOnly,
+        memo,
         examId,
       }) => {
         const id = randomId('task')
@@ -255,6 +291,7 @@ export const usePlannerStore = create<PlannerState>()(
           actualSeconds: resolvedRecordCompleteOnly ? undefined : resolvedActualSeconds,
           recordCompleteOnly: resolvedRecordCompleteOnly,
           status: resolvedStatus,
+          memo: typeof memo === 'string' ? memo : undefined,
           createdAt,
           updatedAt: createdAt,
         }
@@ -263,6 +300,25 @@ export const usePlannerStore = create<PlannerState>()(
           lastUsedSubjectIdByExam: { ...state.lastUsedSubjectIdByExam, [resolvedExamId]: subjectId },
         }))
         return id
+      },
+      duplicateTask: (id, patch) => {
+        const current = get().tasks.find((t) => t.id === id)
+        if (!current) return null
+        const next = { ...current, ...patch }
+        return get().addTask({
+          examId: next.examId,
+          subjectId: next.subjectId,
+          title: next.title,
+          date: next.date,
+          dueDate: next.dueDate,
+          plannedStartTime: next.plannedStartTime,
+          plannedSeconds: next.plannedSeconds,
+          actualStartTime: next.actualStartTime,
+          actualEndTime: next.actualEndTime,
+          actualSeconds: next.actualSeconds,
+          recordCompleteOnly: next.recordCompleteOnly,
+          memo: next.memo,
+        })
       },
       updateTask: (id, patch) =>
         set((state) => {
@@ -310,6 +366,122 @@ export const usePlannerStore = create<PlannerState>()(
           }
         }),
       deleteTask: (id) => set((state) => ({ tasks: state.tasks.filter((t) => t.id !== id) })),
+      replaceSeasonData: ({ examId, subjects, tasks, subjectOrderSourceIds, lastUsedSourceSubjectId }) =>
+        set((state) => {
+          const sourceIds = new Set<string>()
+          const nextSubjects: Subject[] = []
+          const sourceToNextId = new Map<string, string>()
+
+          for (const subject of subjects) {
+            const sourceId = String(subject.sourceId || '').trim()
+            if (!sourceId || sourceIds.has(sourceId)) continue
+            sourceIds.add(sourceId)
+            const nextId = randomId('sub')
+            sourceToNextId.set(sourceId, nextId)
+            nextSubjects.push({
+              id: nextId,
+              examId,
+              name: String(subject.name || '').trim() || '주제',
+              color: String(subject.color || '').trim() || '#94a3b8',
+              archived: Boolean(subject.archived),
+              isRest: Boolean(subject.isRest),
+              createdAt: typeof subject.createdAt === 'string' && subject.createdAt ? subject.createdAt : nowIso(),
+            })
+          }
+
+          const nextTasks: StudyTask[] = []
+          for (const task of tasks) {
+            const mappedSubjectId = sourceToNextId.get(String(task.sourceSubjectId || '').trim())
+            if (!mappedSubjectId) continue
+            const createdAt = typeof task.createdAt === 'string' && task.createdAt ? task.createdAt : nowIso()
+            const updatedAt = typeof task.updatedAt === 'string' && task.updatedAt ? task.updatedAt : createdAt
+            const plannedSecondsSafe = Math.max(0, Math.floor(Number(task.plannedSeconds) || 0))
+            const plannedStartTime = typeof task.plannedStartTime === 'string' && task.plannedStartTime ? task.plannedStartTime : undefined
+            const recordCompleteOnly = Boolean(task.recordCompleteOnly)
+            const impliedActualTimes = recordCompleteOnly
+              ? computeActualTimesFromPlanned({ plannedStartTime, plannedSeconds: plannedSecondsSafe })
+              : null
+            const actualStartTime =
+              typeof (impliedActualTimes?.actualStartTime ?? task.actualStartTime) === 'string' &&
+              (impliedActualTimes?.actualStartTime ?? task.actualStartTime)
+                ? (impliedActualTimes?.actualStartTime ?? task.actualStartTime)
+                : undefined
+            const actualEndTime =
+              typeof (impliedActualTimes?.actualEndTime ?? task.actualEndTime) === 'string' &&
+              (impliedActualTimes?.actualEndTime ?? task.actualEndTime)
+                ? (impliedActualTimes?.actualEndTime ?? task.actualEndTime)
+                : undefined
+            const invalidActualRange = isInvalidTimeRange(actualStartTime, actualEndTime)
+            const actualSeconds =
+              recordCompleteOnly
+                ? undefined
+                : invalidActualRange
+                  ? undefined
+                  : typeof task.actualSeconds === 'number' && Number.isFinite(task.actualSeconds)
+                    ? Math.max(0, Math.floor(task.actualSeconds))
+                    : computeActualSeconds(actualStartTime, actualEndTime)
+            const status: StudyTaskStatus =
+              recordCompleteOnly
+                ? 'completed'
+                : invalidActualRange
+                  ? 'pending'
+                  : actualStartTime && actualEndTime
+                    ? 'completed'
+                    : actualSeconds !== undefined
+                      ? 'completed'
+                      : task.status === 'completed'
+                        ? 'completed'
+                        : 'pending'
+
+            nextTasks.push({
+              id: randomId('task'),
+              examId,
+              subjectId: mappedSubjectId,
+              title: String(task.title || '').trim(),
+              date: typeof task.date === 'string' ? task.date : '',
+              dueDate: typeof task.dueDate === 'string' && task.dueDate ? task.dueDate : undefined,
+              plannedStartTime,
+              plannedSeconds: plannedSecondsSafe,
+              actualStartTime,
+              actualEndTime,
+              actualSeconds,
+              recordCompleteOnly,
+              status,
+              memo: typeof task.memo === 'string' ? task.memo : undefined,
+              createdAt,
+              updatedAt,
+            })
+          }
+
+          const orderedIds: string[] = []
+          const seen = new Set<string>()
+          for (const sourceId of subjectOrderSourceIds ?? []) {
+            const nextId = sourceToNextId.get(String(sourceId || '').trim())
+            if (!nextId || seen.has(nextId)) continue
+            seen.add(nextId)
+            orderedIds.push(nextId)
+          }
+          for (const subject of nextSubjects) {
+            if (seen.has(subject.id)) continue
+            seen.add(subject.id)
+            orderedIds.push(subject.id)
+          }
+
+          const lastUsedSubjectId = lastUsedSourceSubjectId ? sourceToNextId.get(String(lastUsedSourceSubjectId).trim()) : undefined
+          const remainingSubjects = state.subjects.filter((s) => s.examId !== examId)
+          const remainingTasks = state.tasks.filter((t) => t.examId !== examId)
+          const nextLastUsed = { ...state.lastUsedSubjectIdByExam }
+          if (lastUsedSubjectId) nextLastUsed[examId] = lastUsedSubjectId
+          else if (orderedIds[0]) nextLastUsed[examId] = orderedIds[0]
+          else delete nextLastUsed[examId]
+
+          return {
+            subjects: [...remainingSubjects, ...nextSubjects],
+            tasks: [...remainingTasks, ...nextTasks],
+            lastUsedSubjectIdByExam: nextLastUsed,
+            subjectOrderByExam: { ...state.subjectOrderByExam, [examId]: orderedIds },
+          }
+        }),
     }),
     {
       name: 'emma-study-planner:v1',

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { useEscapeKey } from '../lib/useEscapeKey'
 
 const clampInt = (n: number, min: number, max: number) => Math.max(min, Math.min(max, Math.trunc(n)))
 
@@ -89,14 +90,7 @@ export function TimePickerModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
-  useEffect(() => {
-    if (!open) return
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [open, onClose])
+  useEscapeKey(open, onClose, 90)
 
   const hm = `${String(clampInt(draftHour, 0, 23)).padStart(2, '0')}:${String(snapMinuteToStep(clampInt(draftMinute, 0, 59), step)).padStart(2, '0')}`
   const validationMessage = validate?.(hm) ?? null

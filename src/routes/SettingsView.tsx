@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Button, Card, CardHeader, Input } from '../components/ui'
 import { usePlannerStore } from '../store/usePlannerStore'
@@ -6,7 +6,7 @@ import { useAuth } from '../auth/AuthContext'
 import { getSupabase, supabaseConfigOk } from '../lib/supabaseClient'
 import { MobileTopBar } from '../components/MobileTopBar'
 import { TimePickerModal } from '../components/TimePicker'
-import { exportSeasonTasksToXlsx } from '../lib/excelExport'
+import { exportSeasonTasksToXlsx, importSeasonTasksFromXlsx } from '../lib/excelExport'
 
 function hmToMinutesLocal(hm?: string) {
   if (!hm) return null
@@ -82,6 +82,9 @@ export function SettingsView() {
   const resetAll = usePlannerStore((s) => s.resetAll)
   const subjects = usePlannerStore((s) => s.subjects)
   const tasks = usePlannerStore((s) => s.tasks)
+  const lastUsedSubjectIdByExam = usePlannerStore((s) => s.lastUsedSubjectIdByExam)
+  const subjectOrderByExam = usePlannerStore((s) => s.subjectOrderByExam)
+  const replaceSeasonData = usePlannerStore((s) => s.replaceSeasonData)
 
   const activeExams = useMemo(() => exams.filter((e) => e.status === 'active'), [exams])
 
@@ -109,6 +112,32 @@ export function SettingsView() {
     setExamEditorName('')
     setExamEditorDate('')
   }, [examEditorOpen, examEditorMode, editingExam])
+  const importInputRef = useRef<HTMLInputElement | null>(null)
+  const [importTargetSeasonId, setImportTargetSeasonId] = useState<string | null>(null)
+
+  const openSeasonImportPicker = (seasonId: string) => {
+    setImportTargetSeasonId(seasonId)
+    if (importInputRef.current) importInputRef.current.value = ''
+    importInputRef.current?.click()
+  }
+
+  const handleSeasonImport = async (file: File, seasonId: string) => {
+    const season = exams.find((exam) => exam.id === seasonId)
+    if (!season) return
+    const imported = await importSeasonTasksFromXlsx(file)
+    const ok = window.confirm(
+      `"${season.name}" 시즌의 주제/일정을 "${imported.sourceSeasonName}" 파일 내용으로 덮어쓸까요?\n현재 시즌 데이터는 모두 교체됩니다.`,
+    )
+    if (!ok) return
+    replaceSeasonData({
+      examId: seasonId,
+      subjects: imported.subjects,
+      tasks: imported.tasks,
+      subjectOrderSourceIds: imported.subjectOrderSourceIds,
+      lastUsedSourceSubjectId: imported.lastUsedSourceSubjectId,
+    })
+    window.alert(`"${season.name}" 시즌을 파일 내용으로 덮어썼어요.`)
+  }
 
   return (
     <div className="flex flex-col gap-3">
@@ -252,10 +281,15 @@ export function SettingsView() {
                       seasonName: e.name,
                       subjects,
                       tasks,
+                      subjectOrder: subjectOrderByExam[e.id] ?? [],
+                      lastUsedSubjectId: lastUsedSubjectIdByExam[e.id] ?? null,
                     })
                   }
                 >
                   내보내기
+                </Button>
+                <Button variant="secondary" onClick={() => openSeasonImportPicker(e.id)}>
+                  불러오기
                 </Button>
                 <Button
                   variant="secondary"
@@ -272,6 +306,27 @@ export function SettingsView() {
           ))}
         </div>
       </Card>
+
+      <input
+        ref={importInputRef}
+        type="file"
+        accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        className="hidden"
+        onChange={async (e) => {
+          const file = e.target.files?.[0]
+          const seasonId = importTargetSeasonId
+          e.currentTarget.value = ''
+          if (!file || !seasonId) return
+          try {
+            await handleSeasonImport(file, seasonId)
+          } catch (error) {
+            const message = error instanceof Error ? error.message : '불러오기에 실패했어요.'
+            window.alert(message)
+          } finally {
+            setImportTargetSeasonId(null)
+          }
+        }}
+      />
 
       <TimePickerModal
         open={timelinePickerOpen}
