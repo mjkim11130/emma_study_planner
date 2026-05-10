@@ -1,0 +1,1 @@
+import{t as e}from"./jsx-runtime-ByY1xr43.js";import{et as t,rt as n}from"./index-D6W-MfnA.js";var r=e();function i(){let{taskId:e}=n();return e?(0,r.jsx)(t,{to:`/calendar?previewTaskId=${encodeURIComponent(e)}`,replace:!0}):(0,r.jsx)(t,{to:`/`,replace:!0})}export{i as TaskDialogRedirectView};
