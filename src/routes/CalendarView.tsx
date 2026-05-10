@@ -1016,9 +1016,33 @@ export function CalendarView() {
     })
   }
 
+  const navigateToArrangeSurface = (dateValue?: string) => {
+    const hasDateAssigned = Boolean(dateValue && String(dateValue).trim())
+    closePreviewTask()
+    if (hasDateAssigned) {
+      navigate(`/day/${encodeURIComponent(String(dateValue))}`, {
+        state: {
+          openUnscheduledDock: true,
+          unscheduledDockTooltip: TIMELINE_ARRANGE_TOOLTIP,
+        },
+      })
+      return
+    }
+    navigate({ pathname: location.pathname, search: getClosedPreviewSearch() }, {
+      state: {
+        openStartDock: true,
+        startDockTooltip: CALENDAR_ARRANGE_TOOLTIP,
+      },
+    })
+  }
+
   const submitAddDraft = (action: 'close' | 'continue' | 'arrange' = 'close') => {
     if (!previewTask) return
     if (addSubmitLockRef.current) return
+    if (action === 'arrange' && addContinuousMode) {
+      navigateToArrangeSurface(previewTask.date)
+      return
+    }
     const draft = editTitleDraft.trim()
     addSubmitLockRef.current = true
     window.setTimeout(() => {
@@ -2343,7 +2367,11 @@ export function CalendarView() {
 	                    onClick={() => {
 	                      if (isAddMode && addContinuousMode) {
 	                        if (addContinuousHasSaved) {
-	                          submitAddDraft('arrange')
+	                          addSubmitLockRef.current = true
+	                          window.setTimeout(() => {
+	                            addSubmitLockRef.current = false
+	                          }, 300)
+	                          navigateToArrangeSurface(previewTask?.date)
 	                        } else {
 	                          closePreviewTask()
 	                        }
