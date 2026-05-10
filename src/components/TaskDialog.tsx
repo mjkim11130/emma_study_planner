@@ -1,7 +1,8 @@
 import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { ko } from 'date-fns/locale'
-import { format, parseISO } from 'date-fns'
+import { addDays, format, parseISO } from 'date-fns'
+import { useNavigate } from 'react-router-dom'
 import { Button } from './ui'
 import { TaskDialogShell } from './TaskDialogShell'
 import { DurationPickerButton } from './DurationPicker'
@@ -14,8 +15,11 @@ import { useConfirmDialog } from './ConfirmDialog'
 import { buildTimeSummaryNode, formatDurationPreciseKo } from '../lib/taskTimeSummary'
 import { formatDday } from '../lib/dday'
 import { useEscapeKey } from '../lib/useEscapeKey'
+import { todayYmd } from '../lib/dates'
 
 const DRAFT_TASK_ID = '__draft__task__'
+const TIMELINE_ARRANGE_TOOLTIP = '일정을 드래그해서 타임라인에 배치해보세요'
+const CALENDAR_ARRANGE_TOOLTIP = '일정을 드래그해서 캘린더에 배치해보세요'
 
 function hmToMinutes(hm?: string | null) {
   if (!hm) return null
@@ -177,6 +181,7 @@ function CompareRail({
 
 export function TaskDialog() {
   const { request, clearRequest } = useTaskDialog()
+  const navigate = useNavigate()
   const { confirm } = useConfirmDialog()
   const activeExamId = usePlannerStore((s) => s.activeExamId)
   const subjects = usePlannerStore((s) => s.subjects)
@@ -205,6 +210,7 @@ export function TaskDialog() {
   const [editTitleSample, setEditTitleSample] = useState('제목 추가')
   const editTitleOriginalRef = useRef<{ taskId: string; title: string } | null>(null)
   const [editValidationMessage, setEditValidationMessage] = useState<string | null>(null)
+  const [showAddContinuousToggle, setShowAddContinuousToggle] = useState(true)
   const handledRequestRef = useRef<object | null>(null)
 
   const [datePickerField, setDatePickerField] = useState<null | 'date' | 'dueDate'>(null)
@@ -219,6 +225,10 @@ export function TaskDialog() {
 
   const [editExitConfirmOpen, setEditExitConfirmOpen] = useState(false)
   const [timerTaskId, setTimerTaskId] = useState<string | null>(null)
+  const [addMetaExpanded, setAddMetaExpanded] = useState(false)
+  const [addContinuousMode, setAddContinuousMode] = useState(true)
+  const [addContinuousHasSaved, setAddContinuousHasSaved] = useState(false)
+  const addSubmitLockRef = useRef(false)
 
   const storedPreviewTask = useMemo(() => {
     if (!request || request.mode !== 'preview') return null
@@ -243,7 +253,14 @@ export function TaskDialog() {
     [subjects, previewTask?.subjectId],
   )
 
-  const openTaskAddLocal = (initial?: { date?: string; subjectId?: string; plannedStartTime?: string; plannedSeconds?: number }) => {
+  const openTaskAddLocal = (initial?: {
+    date?: string
+    subjectId?: string
+    plannedStartTime?: string
+    plannedSeconds?: number
+    initialContinuousMode?: boolean
+    hideContinuousModeToggle?: boolean
+  }) => {
     const fallbackSubjectId =
       (initial?.subjectId && subjects.some((s) => s.id === initial.subjectId) ? initial.subjectId : null) ??
       (lastUsedSubjectIdByExam[activeExamId] && subjects.some((s) => s.id === lastUsedSubjectIdByExam[activeExamId])
@@ -269,6 +286,11 @@ export function TaskDialog() {
     setAddDraft(draft)
     setEditTaskId(DRAFT_TASK_ID)
     setAutoCloseAfterCompleteTaskId(null)
+    const initialContinuousMode = initial?.initialContinuousMode ?? true
+    setAddMetaExpanded(!initialContinuousMode)
+    setAddContinuousMode(initialContinuousMode)
+    setAddContinuousHasSaved(false)
+    setShowAddContinuousToggle(!initial?.hideContinuousModeToggle)
   }
 
   useEffect(() => {
@@ -282,6 +304,8 @@ export function TaskDialog() {
         subjectId: request.subjectId,
         plannedStartTime: request.plannedStartTime,
         plannedSeconds: request.plannedSeconds,
+        initialContinuousMode: request.initialContinuousMode,
+        hideContinuousModeToggle: request.hideContinuousModeToggle,
       })
       handledRequestRef.current = request
       return
@@ -305,6 +329,10 @@ export function TaskDialog() {
     setTimerTaskId(null)
     setTimePickerOpen(false)
     setDatePickerField(null)
+    setAddMetaExpanded(false)
+    setAddContinuousMode(true)
+    setAddContinuousHasSaved(false)
+    setShowAddContinuousToggle(true)
     clearRequest()
   }
 
@@ -364,6 +392,17 @@ export function TaskDialog() {
       actualSeconds: draft.actualSeconds,
       recordCompleteOnly: draft.recordCompleteOnly,
     })
+    if (request?.mode === 'add') {
+      request.onCommit?.({
+        taskId: id,
+        task: {
+          date: draft.date,
+          plannedStartTime: draft.plannedStartTime,
+          actualStartTime: draft.actualStartTime,
+          actualEndTime: draft.actualEndTime,
+        },
+      })
+    }
     return id
   }
 
@@ -483,18 +522,125 @@ export function TaskDialog() {
     return items
   }, [previewActualSummary, previewPlannedEnd, previewTask])
 
-  const hasPreviewCompare = Boolean(previewActualSummary)
   const hasPreviewMeta = Boolean(isEditingPreview || previewHeadlineTimes.length || previewTask?.dueDate)
+  const hasPreviewCompare = Boolean(previewActualSummary)
+  const showAddMetaToggle = isAddMode && isEditingPreview && !addContinuousMode
+  const showCollapsedPlannedDuration = isAddMode && isEditingPreview && !addMetaExpanded
+  const showExpandedPreviewMeta = hasPreviewMeta && (!isAddMode || addMetaExpanded)
+  const isCollapsedAddMode = isAddMode && !addMetaExpanded
+  const quickTodayDate = todayYmd()
+  const quickTomorrowDate = format(addDays(parseISO(quickTodayDate), 1), 'yyyy-MM-dd')
+  const quickDateSelection = previewTask?.date?.trim() ?? ''
+
+  const buildNextContinuousAddDraft = (base: StudyTask) => {
+    const now = new Date().toISOString()
+    return {
+      id: DRAFT_TASK_ID,
+      examId: base.examId,
+      subjectId: base.subjectId,
+      title: '',
+      date: base.date,
+      plannedSeconds: Math.max(0, base.plannedSeconds ?? 0),
+      status: 'pending' as const,
+      createdAt: now,
+      updatedAt: now,
+    } satisfies StudyTask
+  }
+
+  const completeContinuousAdd = (draft: StudyTask, action: 'continue' | 'arrange') => {
+    const createdId = commitAddDraft(draft)
+    if (!createdId) return
+    if (action === 'continue') {
+      setAddContinuousHasSaved(true)
+      setAddDraft(buildNextContinuousAddDraft(draft))
+      setEditTaskId(DRAFT_TASK_ID)
+      setEditDraft(null)
+      setEditTitleDraft('')
+      setEditTitleSample('제목 추가')
+      setPlannedSecondsDraft(Math.max(0, draft.plannedSeconds ?? 0))
+      setActualSecondsDraft(0)
+      setTimePickerOpen(false)
+      setDatePickerField(null)
+      setPlannedDurationPickerOpen(false)
+      setActualDurationPickerOpen(false)
+      setEditValidationMessage(null)
+      setAddMetaExpanded(false)
+      return
+    }
+    close()
+    const hasDateAssigned = Boolean(draft.date && String(draft.date).trim())
+    if (hasDateAssigned) {
+      navigate(`/day/${encodeURIComponent(draft.date)}`, {
+        state: {
+          openUnscheduledDock: true,
+          unscheduledDockTooltip: TIMELINE_ARRANGE_TOOLTIP,
+        },
+      })
+      return
+    }
+    navigate('/', {
+      state: {
+        openStartDock: true,
+        startDockTooltip: CALENDAR_ARRANGE_TOOLTIP,
+      },
+    })
+  }
+
+  const submitAddDraft = (action: 'close' | 'continue' | 'arrange' = 'close') => {
+    if (!previewTask) return
+    if (addSubmitLockRef.current) return
+    const draft = editTitleDraft.trim()
+    addSubmitLockRef.current = true
+    window.setTimeout(() => {
+      addSubmitLockRef.current = false
+    }, 300)
+    const addFallbackTitle = buildNextTaskTitle((previewSubject?.name ?? '').trim(), tasks)
+    const nextTitle = draft || addFallbackTitle
+    const finalDraft = { ...previewTask, title: nextTitle }
+    setEditValidationMessage(null)
+    if (action === 'continue' || action === 'arrange') {
+      completeContinuousAdd(finalDraft, action)
+      return
+    }
+    const createdId = commitAddDraft(finalDraft)
+    if (!createdId) return
+    setEditTaskId(null)
+    setEditDraft(null)
+    close()
+  }
+
+  const toggleAddContinuousMode = () => {
+    const next = !addContinuousMode
+    setAddContinuousMode(next)
+    if (next) {
+      setAddMetaExpanded(false)
+      patchPreviewTask({
+        dueDate: undefined,
+        plannedStartTime: undefined,
+        actualStartTime: undefined,
+        actualEndTime: undefined,
+        actualSeconds: undefined,
+        recordCompleteOnly: false,
+        status: 'pending',
+      })
+      setActualSecondsDraft(0)
+      return
+    }
+    setAddMetaExpanded(true)
+  }
 
   useEscapeKey(Boolean(isEditingPreview && datePickerField), () => setDatePickerField(null), 75)
   useEscapeKey(Boolean(isEditingPreview && editExitConfirmOpen), () => setEditExitConfirmOpen(false), 80)
 
   const submitPreviewEdit = () => {
     if (!previewTask) return
+    if (isAddMode) {
+      submitAddDraft('close')
+      return
+    }
     const draft = editTitleDraft.trim()
     const original = (editTitleOriginalRef.current?.taskId === previewTask.id ? editTitleOriginalRef.current.title : previewTask.title ?? '').trim()
-    const addFallbackTitle = buildNextTaskTitle((previewSubject?.name ?? '').trim(), tasks)
-    const nextTitle = isAddMode ? draft || addFallbackTitle : draft || original || (previewSubject?.name ?? '').trim()
+    const nextTitle = draft || original || (previewSubject?.name ?? '').trim()
     if (!previewTask.recordCompleteOnly) {
       // start-only completion is allowed; only validate when both exist.
     }
@@ -512,14 +658,6 @@ export function TaskDialog() {
       }
     }
     setEditValidationMessage(null)
-    if (isAddMode) {
-      const createdId = commitAddDraft({ ...previewTask, title: nextTitle })
-      if (!createdId) return
-      setEditTaskId(null)
-      setEditDraft(null)
-      close()
-      return
-    }
     if (!storedPreviewTask) return
     commitEditDraft(storedPreviewTask, { ...(previewTask as StudyTask), title: nextTitle })
     setEditTaskId(null)
@@ -536,6 +674,10 @@ export function TaskDialog() {
   const handleTitleInputKeyUp = (e: ReactKeyboardEvent<HTMLInputElement>) => {
     if (e.key !== 'Enter') return
     if (e.shiftKey || e.altKey || e.ctrlKey || e.metaKey || e.repeat) return
+    if (isAddMode && addContinuousMode) {
+      submitAddDraft('continue')
+      return
+    }
     submitPreviewEdit()
   }
 
@@ -568,6 +710,49 @@ export function TaskDialog() {
         }}
         titleRow={null}
         footer={null}
+        outsideTopBar={
+          isAddMode ? (
+            <div className="no-scrollbar flex items-center gap-2 overflow-x-auto whitespace-nowrap">
+              {[
+                { key: 'unscheduled', label: '날짜 미정', value: '' },
+                { key: 'today', label: '오늘', value: quickTodayDate },
+                { key: 'tomorrow', label: '내일', value: quickTomorrowDate },
+              ].map((item) => {
+                const selected = quickDateSelection === item.value
+                return (
+                  <button
+                    key={item.key}
+                    type="button"
+                    onClick={() => patchPreviewTask({ date: item.value })}
+                    className={`inline-flex h-9 shrink-0 items-center rounded-full border px-3 text-sm font-semibold backdrop-blur-md transition ${
+                      selected
+                        ? 'border-white/85 bg-white/70 text-slate-900'
+                        : 'border-white/85 bg-transparent text-white hover:bg-white/12'
+                    }`}
+                    aria-pressed={selected}
+                  >
+                    {item.label}
+                  </button>
+                )
+              })}
+              {showAddContinuousToggle ? (
+                <button
+                  type="button"
+                  onClick={toggleAddContinuousMode}
+                  className={`ml-auto inline-flex h-9 shrink-0 items-center rounded-full border px-3 backdrop-blur-md transition ${
+                    addContinuousMode
+                      ? 'border-white/90 bg-white font-extrabold text-emerald-500 hover:bg-white/90'
+                      : 'border-white/85 bg-transparent font-semibold text-white hover:bg-white/12'
+                  }`}
+                  aria-pressed={addContinuousMode}
+                  aria-label={addContinuousMode ? '연속모드 켜짐' : '연속모드 꺼짐'}
+                >
+                  연속모드
+                </button>
+              ) : null}
+            </div>
+          ) : null
+        }
       >
         <div className="px-5 py-5 md:px-6">
           {(() => {
@@ -687,43 +872,92 @@ export function TaskDialog() {
 
           {isEditingPreview ? (
             <div className="mt-3.5 px-4">
-              <button
-                type="button"
-                onClick={() => setDatePickerField('date')}
-                className="task-date-edit-trigger inline-flex cursor-pointer items-center gap-2 font-medium text-slate-500 underline decoration-slate-200 decoration-dotted underline-offset-4 transition hover:text-slate-700 hover:decoration-slate-400"
-                aria-label="날짜 선택"
-              >
-                <svg viewBox="0 -960 960 960" className="shrink-0" aria-hidden="true">
-                  <path
-                    d="M200-80q-33 0-56.5-23.5T120-160v-560q0-33 23.5-56.5T200-800h40v-80h80v80h320v-80h80v80h40q33 0 56.5 23.5T840-720v560q0 33-23.5 56.5T760-80H200Zm0-80h560v-400H200v400Z"
-                    fill="currentColor"
-                  />
-                </svg>
-                <span>{formatTaskPreviewDate(previewTask.date) ?? '날짜 선택'}</span>
-                {previewTask.date ? (
-                  <span
-                    role="button"
-                    tabIndex={0}
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      patchPreviewTask({ date: '' })
-                    }}
-                    className="shrink-0 text-base font-semibold text-slate-400 no-underline transition hover:text-slate-600"
-                    aria-label="날짜 삭제"
-                  >
-                    ×
-                  </span>
+              <div className="flex items-start gap-3">
+                <button
+                  type="button"
+                  onClick={() => setDatePickerField('date')}
+                  className="task-date-edit-trigger inline-flex min-w-0 flex-1 cursor-pointer items-center gap-2 font-medium text-slate-500 underline decoration-slate-200 decoration-dotted underline-offset-4 transition hover:text-slate-700 hover:decoration-slate-400"
+                  aria-label="날짜 선택"
+                >
+                  <svg viewBox="0 -960 960 960" className="shrink-0" aria-hidden="true">
+                    <path
+                      d="M200-80q-33 0-56.5-23.5T120-160v-560q0-33 23.5-56.5T200-800h40v-80h80v80h320v-80h80v80h40q33 0 56.5 23.5T840-720v560q0 33-23.5 56.5T760-80H200Zm0-80h560v-400H200v400Z"
+                      fill="currentColor"
+                    />
+                  </svg>
+                  <span className="truncate">{formatTaskPreviewDate(previewTask.date) ?? '날짜 선택'}</span>
+                  {previewTask.date ? (
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        patchPreviewTask({ date: '' })
+                      }}
+                      className="shrink-0 text-base font-semibold text-slate-400 no-underline transition hover:text-slate-600"
+                      aria-label="날짜 삭제"
+                    >
+                      ×
+                    </span>
+                  ) : null}
+                </button>
+                {showCollapsedPlannedDuration ? (
+                  <div className="flex shrink-0 items-center gap-1.5 text-slate-400">
+                    <svg viewBox="0 -960 960 960" className="h-4 w-4 shrink-0" aria-hidden="true">
+                      <path
+                        d="M480-80q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Zm40-440v-200h-80v240l160 160 56-56-136-144Z"
+                        fill="currentColor"
+                      />
+                    </svg>
+                    <DurationPickerButton
+                      valueSeconds={plannedSecondsDraft}
+                      onChangeSeconds={(nextSeconds) => setPlannedSecondsDraft(nextSeconds)}
+                      maxHours={10}
+                      buttonLabel={plannedSecondsDraft > 0 ? formatDurationPreciseKo(plannedSecondsDraft) : '소요시간'}
+                      buttonClassName={`shrink-0 cursor-pointer whitespace-nowrap text-right font-medium underline decoration-dotted underline-offset-4 transition ${
+                        plannedSecondsDraft > 0
+                          ? 'task-time-edit-filled task-time-edit-text text-slate-700 decoration-slate-200 hover:decoration-slate-400'
+                          : 'text-slate-400 decoration-slate-200 hover:decoration-slate-300'
+                      }`}
+                      ariaLabel="소요시간"
+                      open={plannedDurationPickerOpen}
+                      onOpenChange={(next) => {
+                        setPlannedDurationPickerOpen(next)
+                        if (!next) patchPreviewTask({ plannedSeconds: plannedSecondsDraft })
+                      }}
+                    />
+                  </div>
                 ) : null}
-              </button>
+              </div>
+              {showAddMetaToggle ? (
+                <button
+                  type="button"
+                  onClick={() => setAddMetaExpanded((current) => !current)}
+                  className="mt-3 inline-flex h-8 w-full cursor-pointer items-center justify-center gap-1.5 text-sm font-semibold text-slate-500 transition hover:text-slate-800"
+                  aria-label={addMetaExpanded ? '세부 입력 접기' : '세부 입력 펼치기'}
+                >
+                  <span>{addMetaExpanded ? '접기' : '펼치기'}</span>
+                  <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true">
+                    <path
+                      d={addMetaExpanded ? 'm6 15 6-6 6 6' : 'm6 9 6 6 6-6'}
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </button>
+              ) : null}
             </div>
           ) : previewTask.date ? (
             <div className="mt-2 text-base text-slate-500">{formatTaskPreviewDate(previewTask.date)}</div>
           ) : null}
         </div>
 
-        <div className="grid grid-cols-1 gap-4 px-5 py-5 md:grid-cols-2 md:px-6">
-          {hasPreviewMeta ? (
-            <div className="pt-2 md:col-span-2">
+        <div className={`grid grid-cols-1 px-5 md:grid-cols-2 md:px-6 ${isCollapsedAddMode ? 'gap-2 py-1' : 'gap-4 py-5'}`}>
+          {showExpandedPreviewMeta ? (
+            <div className={`${isAddMode ? 'pt-0' : 'pt-2'} md:col-span-2`}>
               <div className="space-y-3">
                 {isEditingPreview ? (
                   <div className="space-y-3">
@@ -1037,14 +1271,28 @@ export function TaskDialog() {
             <div className="grid grid-cols-2 gap-3">
               <button
                 type="button"
-                onClick={submitPreviewEdit}
+                onClick={() => {
+                  if (isAddMode && addContinuousMode) {
+                    submitAddDraft('continue')
+                    return
+                  }
+                  submitPreviewEdit()
+                }}
                 className="inline-flex h-10 w-full items-center justify-center rounded-xl bg-black/80 px-3 py-2 text-sm font-medium text-white transition hover:bg-black/70 disabled:bg-black/30"
               >
-                {isAddMode ? '등록' : '완료'}
+                {isAddMode ? (addContinuousMode ? '계속 등록' : '등록') : '완료'}
               </button>
               <button
                 type="button"
                 onClick={() => {
+                  if (isAddMode && addContinuousMode) {
+                    if (addContinuousHasSaved) {
+                      submitAddDraft('arrange')
+                    } else {
+                      close()
+                    }
+                    return
+                  }
                   if (!previewTask) return
                   if (isAddMode) {
                     close()
@@ -1062,9 +1310,13 @@ export function TaskDialog() {
                   setEditDraft(null)
                   setEditValidationMessage(null)
                 }}
-                className="inline-flex h-10 w-full items-center justify-center rounded-xl bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-200"
+                className={`inline-flex h-10 w-full items-center justify-center rounded-xl px-3 py-2 text-sm font-semibold transition ${
+                  isAddMode && addContinuousMode && addContinuousHasSaved
+                    ? 'bg-emerald-500 text-white hover:bg-emerald-400'
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                }`}
               >
-                {isAddMode ? '등록 취소' : '편집 취소'}
+                {isAddMode ? (addContinuousMode ? (addContinuousHasSaved ? '일정 배치' : '등록 취소') : '등록 취소') : '편집 취소'}
               </button>
             </div>
           </div>

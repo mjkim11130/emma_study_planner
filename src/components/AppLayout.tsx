@@ -1,12 +1,12 @@
 import { createContext, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
-import { NavLink, Outlet, useLocation } from 'react-router-dom'
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { usePlannerStore } from '../store/usePlannerStore'
 import { formatDurationKoFromSeconds } from '../lib/time'
 import { todayYmd } from '../lib/dates'
 import { formatDday } from '../lib/dday'
 import { Button } from './ui'
 import { ConfirmDialogProvider, useConfirmDialog } from './ConfirmDialog'
-import { TaskDialogContext } from './TaskDialogContext'
+import { TaskDialogContext, type TaskDialogAddCommitPayload } from './TaskDialogContext'
 import { TaskDialog } from './TaskDialog'
 import { SubjectDialog } from './SubjectDialog'
 import { IconCalendarMonth, IconCalendarViewDay, IconCalendarWeek, IconPlus } from './NavIcons'
@@ -119,6 +119,7 @@ export function AppLayout() {
 
 function AppLayoutContent() {
   const location = useLocation()
+  const navigate = useNavigate()
   const { confirm } = useConfirmDialog()
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [hasBottomSafeArea, setHasBottomSafeArea] = useState(false)
@@ -140,7 +141,18 @@ function AppLayoutContent() {
   const dayPageMatch = /^\/day\/(\d{4}-\d{2}-\d{2})$/.exec(location.pathname)
   const dayPageDate = dayPageMatch?.[1] ?? ''
   const [taskDialogRequest, setTaskDialogRequest] = useState<
-    null | { mode: 'add'; date?: string; subjectId?: string } | { mode: 'preview'; taskId: string; autoEdit?: boolean; autoCloseAfterComplete?: boolean; autoTimer?: boolean }
+    | null
+    | {
+        mode: 'add'
+        date?: string
+        subjectId?: string
+        plannedStartTime?: string
+        plannedSeconds?: number
+        initialContinuousMode?: boolean
+        hideContinuousModeToggle?: boolean
+        onCommit?: (payload: TaskDialogAddCommitPayload) => void
+      }
+    | { mode: 'preview'; taskId: string; autoEdit?: boolean; autoCloseAfterComplete?: boolean; autoTimer?: boolean }
   >(null)
   const [subjectDialogOpen, setSubjectDialogOpen] = useState(false)
   const [subjectDialogForTaskCreate, setSubjectDialogForTaskCreate] = useState(false)
@@ -307,6 +319,10 @@ function AppLayoutContent() {
     openContextMenu(e, items)
   }
 
+  const openUnscheduledDay = () => {
+    navigate('/day/unscheduled?view=planned')
+  }
+
   useEffect(() => {
     const preventContextMenu = (e: MouseEvent) => {
       e.preventDefault()
@@ -422,15 +438,20 @@ function AppLayoutContent() {
               <div className="mt-3 flex min-h-0 flex-1 flex-col bg-white">
                 <div className="flex items-center justify-between px-3 py-2">
                   <div className="flex items-center gap-2">
-                    <div className="flex items-center gap-1.5 text-[12px] font-semibold text-slate-900">
+                    <button
+                      type="button"
+                      onClick={openUnscheduledDay}
+                      className="flex items-center gap-1.5 rounded-lg px-1 py-1 text-[12px] font-semibold text-slate-900 hover:bg-slate-50"
+                      aria-label="날짜 미정 상세 보기"
+                    >
                       <svg viewBox="0 -960 960 960" className="h-4 w-4 text-slate-800" aria-hidden="true">
-                          <path
-                            d="m388-212-56-56 92-92-92-92 56-56 92 92 92-92 56 56-92 92 92 92-56 56-92-92-92 92ZM200-80q-33 0-56.5-23.5T120-160v-560q0-33 23.5-56.5T200-800h40v-80h80v80h320v-80h80v80h40q33 0 56.5 23.5T840-720v560q0 33-23.5 56.5T760-80H200Zm0-80h560v-400H200v400Z"
-                            fill="currentColor"
-                          />
-                        </svg>
+                        <path
+                          d="m388-212-56-56 92-92-92-92 56-56 92 92 92-92 56 56-92 92 92 92-56 56-92-92-92 92ZM200-80q-33 0-56.5-23.5T120-160v-560q0-33 23.5-56.5T200-800h40v-80h80v80h320v-80h80v80h40q33 0 56.5 23.5T840-720v560q0 33-23.5 56.5T760-80H200Zm0-80h560v-400H200v400Z"
+                          fill="currentColor"
+                        />
+                      </svg>
                       <span>날짜 미정</span>
-                    </div>
+                    </button>
                     {unassignedPending.length ? (
                       <div className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-700 tabular-nums">
                         {unassignedPending.length}
@@ -443,6 +464,11 @@ function AppLayoutContent() {
                 </div>
                 <div
                   className="min-h-0 flex-1 border-t border-slate-100 p-2"
+                  onClick={(e) => {
+                    const target = e.target as HTMLElement | null
+                    if (target?.closest('button')) return
+                    openUnscheduledDay()
+                  }}
                   onContextMenu={openSidebarUnassignedMenu}
                   onDragOver={(e) => {
                     e.preventDefault()

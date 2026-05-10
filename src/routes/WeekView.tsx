@@ -126,8 +126,23 @@ export function WeekView() {
   }, [tasks, ymds, activeExamId])
 
   const [dragOverKey, setDragOverKey] = useState<string | null>(null)
+  const [flashTaskId, setFlashTaskId] = useState<string | null>(null)
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
   const taskTouchContextMenu = useTouchContextMenu()
+  const flashTask = (taskId: string) => {
+    setFlashTaskId(taskId)
+    window.setTimeout(() => {
+      setFlashTaskId((cur) => (cur === taskId ? null : cur))
+    }, 1200)
+  }
+  const openWeekTaskAdd = (input?: { date?: string; subjectId?: string; plannedStartTime?: string; plannedSeconds?: number }) => {
+    openTaskAdd({
+      ...input,
+      onCommit: ({ taskId }) => {
+        flashTask(taskId)
+      },
+    })
+  }
   const openContextMenu = (e: ReactMouseEvent, items: ContextMenuItem[]) => {
     e.preventDefault()
     e.stopPropagation()
@@ -156,6 +171,10 @@ export function WeekView() {
       p.set('weekStart', next)
       return p
     })
+  }
+
+  const openUnscheduledDay = () => {
+    navigate('/day/unscheduled?view=planned')
   }
 
   useEffect(() => {
@@ -222,7 +241,7 @@ export function WeekView() {
   }
 
   const openDateMenu = (e: ReactMouseEvent, ymd: string) => {
-    const items: ContextMenuItem[] = [{ key: 'add', label: '일정 추가', icon: <IconPlus className="h-4 w-4" />, onSelect: () => openTaskAdd({ date: ymd }) }]
+    const items: ContextMenuItem[] = [{ key: 'add', label: '일정 추가', icon: <IconPlus className="h-4 w-4" />, onSelect: () => openWeekTaskAdd({ date: ymd }) }]
     if (getTaskClipboard()) {
       items.push({
         key: 'paste',
@@ -231,6 +250,9 @@ export function WeekView() {
           pasteTaskFromClipboard(addTask, { date: ymd })
         },
       })
+    }
+    if (!ymd) {
+      items.push({ key: 'planned', label: '날짜 미정 보기', icon: <IconChecklist className="h-4 w-4" />, onSelect: openUnscheduledDay })
     }
     if (ymd) {
       items.push(
@@ -243,7 +265,7 @@ export function WeekView() {
   }
 
   const openDateMenuAt = (x: number, y: number, ymd: string) => {
-    const items: ContextMenuItem[] = [{ key: 'add', label: '일정 추가', icon: <IconPlus className="h-4 w-4" />, onSelect: () => openTaskAdd({ date: ymd }) }]
+    const items: ContextMenuItem[] = [{ key: 'add', label: '일정 추가', icon: <IconPlus className="h-4 w-4" />, onSelect: () => openWeekTaskAdd({ date: ymd }) }]
     if (getTaskClipboard()) {
       items.push({
         key: 'paste',
@@ -252,6 +274,9 @@ export function WeekView() {
           pasteTaskFromClipboard(addTask, { date: ymd })
         },
       })
+    }
+    if (!ymd) {
+      items.push({ key: 'planned', label: '날짜 미정 보기', icon: <IconChecklist className="h-4 w-4" />, onSelect: openUnscheduledDay })
     }
     if (ymd) {
       items.push(
@@ -284,7 +309,9 @@ export function WeekView() {
         onContextMenu={(e) => openTaskMenu(e, t)}
         {...taskTouchContextMenu.bind(`week-task:${t.id}`, ({ x, y }) => openTaskMenuAt(x, y, t))}
         data-task-card="true"
-        className="flex w-full select-none items-center gap-1 rounded-[4px] border border-black/10 px-1.5 py-1 text-left text-[11px] font-semibold leading-tight shadow-sm"
+        className={`flex w-full select-none items-center gap-1 rounded-[4px] border border-black/10 px-1.5 py-1 text-left text-[11px] font-semibold leading-tight shadow-sm ${
+          flashTaskId === t.id ? 'emma-flash-3' : ''
+        }`}
         style={{ backgroundColor: bg, color: onText }}
       >
         <span className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-clip">{t.title || '제목 없음'}</span>
@@ -490,7 +517,7 @@ export function WeekView() {
                     key={ymd}
                     keyId={ymd}
                     header={<span className={headerTone}>{dayHeaderLabel(d)}</span>}
-                    onAdd={() => openTaskAdd({ date: ymd })}
+                    onAdd={() => openWeekTaskAdd({ date: ymd })}
                     onOpenDay={() => navigate(`/day/${ymd}`)}
                     items={bucket}
                     isToday={isToday}
@@ -501,12 +528,11 @@ export function WeekView() {
               <Cell
                 key="__unassigned__"
                 keyId="__unassigned__"
-                header={<span className="text-slate-500">날짜 미정</span>}
+                header={<span className="text-slate-500">날짜미정</span>}
                 tone="muted"
-                onAdd={() => openTaskAdd({ date: '' })}
-                onOpenDay={() => {}}
+                onAdd={() => openWeekTaskAdd({ date: '' })}
+                onOpenDay={openUnscheduledDay}
                 items={tasksByDate.unassigned}
-                canOpenDay={false}
                 onContextMenu={(e) => openDateMenu(e, '')}
               />,
             ]

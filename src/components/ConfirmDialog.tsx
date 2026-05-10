@@ -1,4 +1,4 @@
-import { createContext, useContext, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
 type ConfirmOptions = {
   title?: string
@@ -22,6 +22,7 @@ export function useConfirmDialog() {
 
 export function ConfirmDialogProvider({ children }: { children: ReactNode }) {
   const resolverRef = useRef<((value: boolean) => void) | null>(null)
+  const confirmButtonRef = useRef<HTMLButtonElement | null>(null)
   const [dialog, setDialog] = useState<ConfirmOptions | null>(null)
 
   const close = (result: boolean) => {
@@ -42,6 +43,11 @@ export function ConfirmDialogProvider({ children }: { children: ReactNode }) {
     [],
   )
 
+  useEffect(() => {
+    if (!dialog) return
+    confirmButtonRef.current?.focus()
+  }, [dialog])
+
   return (
     <ConfirmDialogContext.Provider value={value}>
       {children}
@@ -61,6 +67,7 @@ export function ConfirmDialogProvider({ children }: { children: ReactNode }) {
               <button
                 type="button"
                 onClick={() => close(true)}
+                ref={confirmButtonRef}
                 className={`inline-flex h-10 items-center justify-center rounded-xl px-4 text-sm font-semibold ${
                   dialog.danger
                     ? 'bg-rose-600 text-white hover:bg-rose-700'

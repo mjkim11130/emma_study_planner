@@ -1,6 +1,6 @@
 import { addDays, format, startOfWeek } from 'date-fns'
-import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ContextMenu, type ContextMenuItem, type ContextMenuState } from '../components/ContextMenu'
 import { useConfirmDialog } from '../components/ConfirmDialog'
 import { todayYmd, ymdToDate } from '../lib/dates'
@@ -190,16 +190,29 @@ function remToPx(rem: string) {
   return n * (Number.isFinite(root) ? root : 16)
 }
 
+const UNSCHEDULED_DAY_PARAM = 'unscheduled'
+
 export function DayDetailView() {
+  const location = useLocation()
   const navigate = useNavigate()
   const { confirm } = useConfirmDialog()
   const lastUsedSubjectIdByExam = usePlannerStore((s) => s.lastUsedSubjectIdByExam)
   const params = useParams()
-  const date = params.date ?? todayYmd()
+  const dateParam = params.date ?? todayYmd()
+  const isUnscheduledDay = dateParam === UNSCHEDULED_DAY_PARAM
+  const date = isUnscheduledDay ? '' : dateParam
   const activeExamId = usePlannerStore((s) => s.activeExamId)
   const subjects = usePlannerStore((s) => s.subjects)
   const allTasks = usePlannerStore((s) => s.tasks)
-  const tasks = useMemo(() => allTasks.filter((t) => t.examId === activeExamId && t.date === date), [allTasks, activeExamId, date])
+  const tasks = useMemo(
+    () =>
+      allTasks.filter((t) => {
+        if (t.examId !== activeExamId) return false
+        if (isUnscheduledDay) return !t.date?.trim()
+        return t.date === date
+      }),
+    [allTasks, activeExamId, date, isUnscheduledDay],
+  )
   const addTask = usePlannerStore((s) => s.addTask)
   const updateTask = usePlannerStore((s) => s.updateTask)
   const duplicateTask = usePlannerStore((s) => s.duplicateTask)
@@ -258,7 +271,14 @@ export function DayDetailView() {
         key: 'add',
         label: '일정 추가',
         icon: <IconPlus className="h-4 w-4" />,
-        onSelect: () => openTaskAdd({ date, plannedStartTime: minutesToHm(startMin), plannedSeconds: 0 }),
+        onSelect: () =>
+          openDayTaskAdd({
+            date,
+            plannedStartTime: minutesToHm(startMin),
+            plannedSeconds: 0,
+            initialContinuousMode: false,
+            hideContinuousModeToggle: true,
+          }),
       },
     ]
     const clipboardTask = buildClipboardTaskAtTime(minutesToHm(startMin))
@@ -289,7 +309,14 @@ export function DayDetailView() {
         key: 'add',
         label: '일정 추가',
         icon: <IconPlus className="h-4 w-4" />,
-        onSelect: () => openTaskAdd({ date, plannedStartTime: minutesToHm(startMin), plannedSeconds: 0 }),
+        onSelect: () =>
+          openDayTaskAdd({
+            date,
+            plannedStartTime: minutesToHm(startMin),
+            plannedSeconds: 0,
+            initialContinuousMode: false,
+            hideContinuousModeToggle: true,
+          }),
       },
     ]
     const clipboardTask = buildClipboardTaskAtTime(minutesToHm(startMin))
@@ -315,11 +342,18 @@ export function DayDetailView() {
     openContextMenuAt(x, y, items)
   }
   const [unscheduledOpen, setUnscheduledOpen] = useState(false)
+  const [unscheduledTooltip, setUnscheduledTooltip] = useState<string | null>(null)
+  const [unscheduledTooltipPosition, setUnscheduledTooltipPosition] = useState<{ left: number; top: number } | null>(null)
+  const unscheduledTooltipTimerRef = useRef<number | null>(null)
+  const unscheduledDockRootRef = useRef<HTMLDivElement | null>(null)
+  const unscheduledTooltipRef = useRef<HTMLDivElement | null>(null)
+  const [flashTaskId, setFlashTaskId] = useState<string | null>(null)
   const [timelineTimePickerOpen, setTimelineTimePickerOpen] = useState(false)
   const [timelineTimePickerField, setTimelineTimePickerField] = useState<null | 'start' | 'end'>(null)
   const [unscheduledDock, setUnscheduledDock] = useState<{ v: 'top' | 'bottom'; h: 'right' }>({ v: 'bottom', h: 'right' })
   const topDockY = 64
   const [isXlUp, setIsXlUp] = useState(false)
+  const flashTaskButtonRef = useRef<HTMLButtonElement | null>(null)
   useEffect(() => {
     if (typeof window === 'undefined' || !window.matchMedia) return
     const mq = window.matchMedia('(min-width: 1280px)')
@@ -333,6 +367,48 @@ export function DayDetailView() {
     mq.addListener(onChange)
     return () => mq.removeListener(onChange)
   }, [])
+  useEffect(() => {
+    return () => {
+      if (unscheduledTooltipTimerRef.current !== null) window.clearTimeout(unscheduledTooltipTimerRef.current)
+    }
+  }, [])
+  useLayoutEffect(() => {
+    if (!unscheduledTooltip) {
+      setUnscheduledTooltipPosition(null)
+      return
+    }
+    if (typeof window === 'undefined') return
+    const syncTooltipPosition = () => {
+      const root = unscheduledDockRootRef.current
+      const tooltipEl = unscheduledTooltipRef.current
+      if (!root) {
+        setUnscheduledTooltipPosition(null)
+        return
+      }
+      const rect = root.getBoundingClientRect()
+      const viewportWidth = window.innerWidth || 0
+      const tooltipWidth = tooltipEl?.getBoundingClientRect().width ?? Math.min(448, Math.max(0, viewportWidth - 32))
+      const sideMargin = 16
+      const centeredLeft = rect.left + rect.width / 2
+      const clampedLeft = Math.min(
+        viewportWidth - sideMargin - tooltipWidth / 2,
+        Math.max(sideMargin + tooltipWidth / 2, centeredLeft),
+      )
+      setUnscheduledTooltipPosition({
+        left: clampedLeft,
+        top: Math.max(16, rect.top - 12),
+      })
+    }
+    syncTooltipPosition()
+    const rafId = window.requestAnimationFrame(syncTooltipPosition)
+    const timerId = window.setTimeout(syncTooltipPosition, 220)
+    window.addEventListener('resize', syncTooltipPosition)
+    return () => {
+      window.cancelAnimationFrame(rafId)
+      window.clearTimeout(timerId)
+      window.removeEventListener('resize', syncTooltipPosition)
+    }
+  }, [unscheduledTooltip, unscheduledOpen, unscheduledDock.v, isXlUp])
   const dockDragRef = useRef<{
     isDragging: boolean
     startX: number
@@ -352,7 +428,7 @@ export function DayDetailView() {
       subjects[0]?.id ??
       ''
     if (!fallbackSubjectId) return
-    openTaskAdd({ date })
+    openDayTaskAdd({ date })
   }
 
   const onUnscheduledDockPointerDown = (e: React.PointerEvent, allowOnInteractive: boolean) => {
@@ -469,17 +545,18 @@ export function DayDetailView() {
   }, [tasks, subjects])
 
   const dayUnscheduled = useMemo(() => {
+    if (isUnscheduledDay) return []
     return tasks
       .filter((t) => t.date === date && !t.actualStartTime && !t.plannedStartTime)
       .slice()
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
-  }, [tasks, date])
+  }, [tasks, date, isUnscheduledDay])
 
-  const title = date ? format(ymdToDate(date), 'yyyy년 M월 d일') : 'Day Detail'
-  const prevYmd = useMemo(() => format(addDays(ymdToDate(date), -1), 'yyyy-MM-dd'), [date])
-  const nextYmd = useMemo(() => format(addDays(ymdToDate(date), 1), 'yyyy-MM-dd'), [date])
-  const prevLabel = useMemo(() => `${format(addDays(ymdToDate(date), -1), 'd')}일`, [date])
-  const nextLabel = useMemo(() => `${format(addDays(ymdToDate(date), 1), 'd')}일`, [date])
+  const title = isUnscheduledDay ? '날짜 미정' : date ? format(ymdToDate(date), 'yyyy년 M월 d일') : 'Day Detail'
+  const prevYmd = useMemo(() => (isUnscheduledDay ? '' : format(addDays(ymdToDate(date), -1), 'yyyy-MM-dd')), [date, isUnscheduledDay])
+  const nextYmd = useMemo(() => (isUnscheduledDay ? '' : format(addDays(ymdToDate(date), 1), 'yyyy-MM-dd')), [date, isUnscheduledDay])
+  const prevLabel = useMemo(() => (isUnscheduledDay ? '' : `${format(addDays(ymdToDate(date), -1), 'd')}일`), [date, isUnscheduledDay])
+  const nextLabel = useMemo(() => (isUnscheduledDay ? '' : `${format(addDays(ymdToDate(date), 1), 'd')}일`), [date, isUnscheduledDay])
 
   const openTimelineTimePicker = (field: 'start' | 'end') => {
     setTimelineTimePickerField(field)
@@ -487,13 +564,69 @@ export function DayDetailView() {
   }
 
   const [searchParams, setSearchParams] = useSearchParams()
+  const dayNavState = (location.state as { openUnscheduledDock?: boolean; unscheduledDockTooltip?: string } | null)
+  const shouldOpenUnscheduledDockFromNav = Boolean(dayNavState?.openUnscheduledDock)
+  const unscheduledTooltipFromNav = (dayNavState?.unscheduledDockTooltip ?? '').trim()
   const makeDayLink = (ymd: string) => {
     const v = searchParams.get('view')
     const q = v && v !== 'timeline' ? `?view=${encodeURIComponent(v)}` : ''
     return `/day/${ymd}${q}`
   }
   const dayViewMode: 'timeline' | 'planned' | 'completed' =
-    searchParams.get('view') === 'planned' ? 'planned' : searchParams.get('view') === 'completed' ? 'completed' : 'timeline'
+    isUnscheduledDay
+      ? searchParams.get('view') === 'completed'
+        ? 'completed'
+        : 'planned'
+      : searchParams.get('view') === 'planned'
+        ? 'planned'
+        : searchParams.get('view') === 'completed'
+          ? 'completed'
+          : 'timeline'
+  const flashTask = (taskId: string) => {
+    setFlashTaskId(taskId)
+    window.setTimeout(() => {
+      setFlashTaskId((cur) => (cur === taskId ? null : cur))
+    }, 1200)
+  }
+  const openDayTaskAdd = (input?: {
+    date?: string
+    subjectId?: string
+    plannedStartTime?: string
+    plannedSeconds?: number
+    initialContinuousMode?: boolean
+    hideContinuousModeToggle?: boolean
+  }) => {
+    openTaskAdd({
+      ...input,
+      onCommit: ({ taskId, task }) => {
+        if (task.date !== date) return
+        flashTask(taskId)
+        if (!task.actualStartTime && !task.plannedStartTime && !isXlUp && dayViewMode === 'timeline') setUnscheduledOpen(true)
+      },
+    })
+  }
+  useEffect(() => {
+    if (!shouldOpenUnscheduledDockFromNav && !unscheduledTooltipFromNav) return
+    if (!isUnscheduledDay && dayViewMode === 'timeline' && !isXlUp && shouldOpenUnscheduledDockFromNav) setUnscheduledOpen(true)
+    if (unscheduledTooltipFromNav) {
+      setUnscheduledTooltip(unscheduledTooltipFromNav)
+      if (unscheduledTooltipTimerRef.current !== null) window.clearTimeout(unscheduledTooltipTimerRef.current)
+      unscheduledTooltipTimerRef.current = window.setTimeout(() => {
+        setUnscheduledTooltip(null)
+        unscheduledTooltipTimerRef.current = null
+      }, 2000)
+    }
+    navigate({ pathname: location.pathname, search: location.search }, { replace: true, state: null })
+  }, [
+    shouldOpenUnscheduledDockFromNav,
+    unscheduledTooltipFromNav,
+    isUnscheduledDay,
+    dayViewMode,
+    isXlUp,
+    navigate,
+    location.pathname,
+    location.search,
+  ])
   const daySwipeRef = useRef<{ isDown: boolean; startX: number; startY: number; lastX: number }>({
     isDown: false,
     startX: 0,
@@ -597,6 +730,11 @@ export function DayDetailView() {
     return out
   }, [tasks, subjects])
 
+  useEffect(() => {
+    if (!unscheduledOpen || !flashTaskId) return
+    flashTaskButtonRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' })
+  }, [unscheduledOpen, flashTaskId, dayUnscheduled.length])
+
   // listGroups are filtered inside listPanel(mode)
 
   const duplicateTimelineTaskAt = (taskId: string, kind: TimelineKind, startMin: number, durationMin: number) => {
@@ -638,6 +776,7 @@ export function DayDetailView() {
       <div data-no-day-swipe={daySwipeBlocked ? 'true' : undefined}>
       <DayTimeline
         items={timelineItems}
+        flashTaskId={flashTaskId}
         viewStartMin={timelineWindow.startMin}
         viewEndMin={timelineWindow.endMin}
         onChangeWindow={(startMin, endMin) => setTimelineWindow({ startMin, endMin })}
@@ -714,7 +853,13 @@ export function DayDetailView() {
           const minutes = Math.max(0, end - start)
           // if user only uses the minimum 10-min selection, treat it as "start time only" (no duration)
           const plannedSeconds = minutes <= 10 ? 0 : minutes * 60
-          openTaskAdd({ date, plannedStartTime: minutesToHm(start), plannedSeconds })
+          openDayTaskAdd({
+            date,
+            plannedStartTime: minutesToHm(start),
+            plannedSeconds,
+            initialContinuousMode: false,
+            hideContinuousModeToggle: true,
+          })
         }}
       />
       </div>
@@ -732,7 +877,7 @@ export function DayDetailView() {
         <span className="xl:hidden" />
         <button
           type="button"
-          onClick={() => openTaskAdd({ date })}
+          onClick={() => openDayTaskAdd({ date })}
           className="inline-flex h-9 items-center justify-center rounded-xl bg-black/80 px-3 text-sm font-semibold text-white hover:bg-black/70"
           aria-label={`${mode === 'completed' ? '완료' : '계획'} 일정 추가`}
         >
@@ -942,7 +1087,8 @@ export function DayDetailView() {
     setSearchParams(
       (prev) => {
         const p = new URLSearchParams(prev)
-        if (next === 'planned') p.set('view', 'planned')
+        if (isUnscheduledDay && next === 'timeline') p.set('view', 'planned')
+        else if (next === 'planned') p.set('view', 'planned')
         else if (next === 'completed') p.set('view', 'completed')
         else p.delete('view')
         return p
@@ -957,14 +1103,15 @@ export function DayDetailView() {
         const dayTabs = (
           <div ref={dayTabsRef} className="relative flex w-full select-none items-stretch justify-between">
             {(() => {
-              const idx = dayViewMode === 'timeline' ? 0 : dayViewMode === 'planned' ? 1 : 2
+              const tabCount = isUnscheduledDay ? 2 : 3
+              const idx = isUnscheduledDay ? (dayViewMode === 'completed' ? 1 : 0) : dayViewMode === 'timeline' ? 0 : dayViewMode === 'planned' ? 1 : 2
               const w = dayTabsW || 1
-              const progress = idx + -daySwipeX / w
-              const clamped = Math.max(0, Math.min(2, progress))
-              const leftPct = (clamped / 3) * 100
+              const progress = isUnscheduledDay ? idx : idx + -daySwipeX / w
+              const clamped = Math.max(0, Math.min(tabCount - 1, progress))
+              const leftPct = (clamped / tabCount) * 100
               return (
                 <div
-                  className="absolute bottom-0 h-[3px] w-1/3 bg-black/80"
+                  className={`absolute bottom-0 h-[3px] bg-black/80 ${isUnscheduledDay ? 'w-1/2' : 'w-1/3'}`}
                   style={{
                     left: `${leftPct}%`,
                     transition: dayIsSwiping ? 'none' : 'left 220ms cubic-bezier(0.16, 1, 0.3, 1)',
@@ -973,15 +1120,17 @@ export function DayDetailView() {
                 />
               )
             })()}
-            <button
-              type="button"
-              onClick={() => setDayViewMode('timeline')}
-              className={`flex-1 py-2 text-center text-base font-medium ${
-                dayViewMode === 'timeline' ? 'text-slate-900' : 'text-slate-500'
-              }`}
-            >
-              타임라인
-            </button>
+            {!isUnscheduledDay ? (
+              <button
+                type="button"
+                onClick={() => setDayViewMode('timeline')}
+                className={`flex-1 py-2 text-center text-base font-medium ${
+                  dayViewMode === 'timeline' ? 'text-slate-900' : 'text-slate-500'
+                }`}
+              >
+                타임라인
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={() => setDayViewMode('planned')}
@@ -1006,14 +1155,18 @@ export function DayDetailView() {
           <MobileTopBar
             title={title}
             left={
-              <Button variant="secondary" onClick={() => navigate(makeDayLink(prevYmd))}>
-                {prevLabel}
-              </Button>
+              !isUnscheduledDay ? (
+                <Button variant="secondary" onClick={() => navigate(makeDayLink(prevYmd))}>
+                  {prevLabel}
+                </Button>
+              ) : undefined
             }
             right={
-              <Button variant="secondary" onClick={() => navigate(makeDayLink(nextYmd))}>
-                {nextLabel}
-              </Button>
+              !isUnscheduledDay ? (
+                <Button variant="secondary" onClick={() => navigate(makeDayLink(nextYmd))}>
+                  {nextLabel}
+                </Button>
+              ) : undefined
             }
             bottom={
               <div className="xl:hidden">
@@ -1024,134 +1177,157 @@ export function DayDetailView() {
         )
       })()}
 
-      <div className="hidden xl:grid xl:grid-cols-2 xl:items-start xl:gap-4">
-        <div className="min-w-0">{timelinePanel}</div>
-        <div className="min-w-0">
-          <div className="flex min-h-0 flex-col">
-            {listHasAny.plannedAny ? <div className="min-h-0">{listPanel('planned')}</div> : null}
-            {listHasAny.plannedAny && listHasAny.completedAny ? <div className="my-3 h-px w-full bg-slate-200" /> : null}
-            {listHasAny.completedAny ? <div className="min-h-0">{listPanel('completed')}</div> : null}
+      {isUnscheduledDay ? (
+        <>
+          <div className="hidden xl:block">
+            {listPanel(dayViewMode === 'completed' ? 'completed' : 'planned')}
           </div>
-        </div>
-      </div>
-      <div
-        className="xl:hidden"
-        ref={daySwipeHostRef}
-        onPointerDown={(e) => {
-          if (e.pointerType !== 'touch') return
-          const target = e.target as HTMLElement | null
-          // do not steal gestures on interactive controls
-          if (target?.closest('input, textarea, select, [data-no-day-swipe=\"true\"]')) return
-          daySwipeRef.current.isDown = true
-          daySwipeRef.current.startX = e.clientX
-          daySwipeRef.current.startY = e.clientY
-          daySwipeRef.current.lastX = e.clientX
-          daySwipeLockRef.current = 'none'
-          setDayIsSwiping(false)
-          setDaySwipeX(0)
-          if (daySwipeHostRef.current) daySwipeHostRef.current.style.touchAction = 'pan-y'
-          stopDaySwipeScrollStop()
-        }}
-        onPointerMove={(e) => {
-          if (e.pointerType !== 'touch') return
-          if (!daySwipeRef.current.isDown) return
-          const dx = e.clientX - daySwipeRef.current.startX
-          const dy = e.clientY - daySwipeRef.current.startY
-          if (daySwipeLockRef.current === 'none') {
-            if (Math.abs(dx) < 3 && Math.abs(dy) < 3) return
-            if (Math.abs(dx) > Math.abs(dy) * 1.08) daySwipeLockRef.current = 'h'
-            else if (Math.abs(dy) > Math.abs(dx) * 1.08) daySwipeLockRef.current = 'v'
-            else return
-            if (daySwipeLockRef.current === 'h') {
-              if (daySwipeHostRef.current) daySwipeHostRef.current.style.touchAction = 'pan-x'
-              startDaySwipeScrollStop()
-              try {
-                ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
-              } catch {
-                // ignore
-              }
-            } else {
-              // vertical intent: ensure horizontal swipe never steals this gesture
+          <div className="xl:hidden">
+            <div
+              ref={dayViewMode === 'planned' ? plannedScrollRef : completedScrollRef}
+              className="overflow-y-auto overscroll-contain"
+              style={{ height: 'calc(100dvh - env(safe-area-inset-top) - 120px - var(--bottom-nav-h, 0px) - var(--bottom-overlay-offset, 0px))' }}
+              onScroll={(e) => {
+                scrollTopByTabRef.current[dayViewMode === 'completed' ? 'completed' : 'planned'] =
+                  (e.currentTarget as HTMLDivElement).scrollTop
+              }}
+            >
+              {listPanel(dayViewMode === 'completed' ? 'completed' : 'planned')}
+            </div>
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="hidden xl:grid xl:grid-cols-2 xl:items-start xl:gap-4">
+            <div className="min-w-0">{timelinePanel}</div>
+            <div className="min-w-0">
+              <div className="flex min-h-0 flex-col">
+                {listHasAny.plannedAny ? <div className="min-h-0">{listPanel('planned')}</div> : null}
+                {listHasAny.plannedAny && listHasAny.completedAny ? <div className="my-3 h-px w-full bg-slate-200" /> : null}
+                {listHasAny.completedAny ? <div className="min-h-0">{listPanel('completed')}</div> : null}
+              </div>
+            </div>
+          </div>
+          <div
+            className="xl:hidden"
+            ref={daySwipeHostRef}
+            onPointerDown={(e) => {
+              if (e.pointerType !== 'touch') return
+              const target = e.target as HTMLElement | null
+              // do not steal gestures on interactive controls
+              if (target?.closest('input, textarea, select, [data-no-day-swipe=\"true\"]')) return
+              daySwipeRef.current.isDown = true
+              daySwipeRef.current.startX = e.clientX
+              daySwipeRef.current.startY = e.clientY
+              daySwipeRef.current.lastX = e.clientX
+              daySwipeLockRef.current = 'none'
+              setDayIsSwiping(false)
+              setDaySwipeX(0)
               if (daySwipeHostRef.current) daySwipeHostRef.current.style.touchAction = 'pan-y'
               stopDaySwipeScrollStop()
-            }
-          }
-          if (daySwipeLockRef.current === 'v') return
-          if (!dayIsSwiping) setDayIsSwiping(true)
-          daySwipeRef.current.lastX = e.clientX
-          // lock out vertical scroll while we are swiping horizontally (even if hand jitters vertically)
-          if (e.cancelable) e.preventDefault()
-          setDaySwipeX(dx)
-        }}
-        onPointerUp={(e) => {
-          if (e.pointerType !== 'touch') return
-          if (!daySwipeRef.current.isDown) return
-          daySwipeRef.current.isDown = false
-          const dx = e.clientX - daySwipeRef.current.startX
-          const threshold = 62
-          setDayIsSwiping(false)
-          setDaySwipeX(0)
-          if (daySwipeHostRef.current) daySwipeHostRef.current.style.touchAction = 'pan-y'
-          stopDaySwipeScrollStop()
-          if (daySwipeLockRef.current !== 'h') return
-          if (Math.abs(dx) < threshold) return
-          if (dx < 0) {
-            if (dayViewMode === 'timeline') setDayViewMode('planned')
-            else if (dayViewMode === 'planned') setDayViewMode('completed')
-          } else {
-            if (dayViewMode === 'completed') setDayViewMode('planned')
-            else if (dayViewMode === 'planned') setDayViewMode('timeline')
-          }
-        }}
-        onPointerCancel={() => {
-          daySwipeRef.current.isDown = false
-          daySwipeLockRef.current = 'none'
-          setDayIsSwiping(false)
-          setDaySwipeX(0)
-          if (daySwipeHostRef.current) daySwipeHostRef.current.style.touchAction = 'pan-y'
-          stopDaySwipeScrollStop()
-        }}
-        style={{ touchAction: 'pan-y' }}
-      >
-        <div className="relative overflow-hidden">
-          <div
-            className="flex w-[300%]"
-            style={{
-              transform: (() => {
-                const base = dayViewMode === 'timeline' ? 0 : dayViewMode === 'planned' ? -33.3333 : -66.6666
-                const dx = dayViewMode === 'timeline' ? Math.min(0, daySwipeX) : dayViewMode === 'completed' ? Math.max(0, daySwipeX) : daySwipeX
-                return `translate3d(calc(${base}% + ${dx}px), 0, 0)`
-              })(),
-              transition: dayIsSwiping ? 'none' : 'transform 220ms cubic-bezier(0.16, 1, 0.3, 1)',
             }}
+            onPointerMove={(e) => {
+              if (e.pointerType !== 'touch') return
+              if (!daySwipeRef.current.isDown) return
+              const dx = e.clientX - daySwipeRef.current.startX
+              const dy = e.clientY - daySwipeRef.current.startY
+              if (daySwipeLockRef.current === 'none') {
+                if (Math.abs(dx) < 3 && Math.abs(dy) < 3) return
+                if (Math.abs(dx) > Math.abs(dy) * 1.08) daySwipeLockRef.current = 'h'
+                else if (Math.abs(dy) > Math.abs(dx) * 1.08) daySwipeLockRef.current = 'v'
+                else return
+                if (daySwipeLockRef.current === 'h') {
+                  if (daySwipeHostRef.current) daySwipeHostRef.current.style.touchAction = 'pan-x'
+                  startDaySwipeScrollStop()
+                  try {
+                    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+                  } catch {
+                    // ignore
+                  }
+                } else {
+                  // vertical intent: ensure horizontal swipe never steals this gesture
+                  if (daySwipeHostRef.current) daySwipeHostRef.current.style.touchAction = 'pan-y'
+                  stopDaySwipeScrollStop()
+                }
+              }
+              if (daySwipeLockRef.current === 'v') return
+              if (!dayIsSwiping) setDayIsSwiping(true)
+              daySwipeRef.current.lastX = e.clientX
+              // lock out vertical scroll while we are swiping horizontally (even if hand jitters vertically)
+              if (e.cancelable) e.preventDefault()
+              setDaySwipeX(dx)
+            }}
+            onPointerUp={(e) => {
+              if (e.pointerType !== 'touch') return
+              if (!daySwipeRef.current.isDown) return
+              daySwipeRef.current.isDown = false
+              const dx = e.clientX - daySwipeRef.current.startX
+              const threshold = 62
+              setDayIsSwiping(false)
+              setDaySwipeX(0)
+              if (daySwipeHostRef.current) daySwipeHostRef.current.style.touchAction = 'pan-y'
+              stopDaySwipeScrollStop()
+              if (daySwipeLockRef.current !== 'h') return
+              if (Math.abs(dx) < threshold) return
+              if (dx < 0) {
+                if (dayViewMode === 'timeline') setDayViewMode('planned')
+                else if (dayViewMode === 'planned') setDayViewMode('completed')
+              } else {
+                if (dayViewMode === 'completed') setDayViewMode('planned')
+                else if (dayViewMode === 'planned') setDayViewMode('timeline')
+              }
+            }}
+            onPointerCancel={() => {
+              daySwipeRef.current.isDown = false
+              daySwipeLockRef.current = 'none'
+              setDayIsSwiping(false)
+              setDaySwipeX(0)
+              if (daySwipeHostRef.current) daySwipeHostRef.current.style.touchAction = 'pan-y'
+              stopDaySwipeScrollStop()
+            }}
+            style={{ touchAction: 'pan-y' }}
           >
-            <div
-              ref={timelineScrollRef}
-              className="w-1/3 overflow-y-auto overscroll-contain"
-              style={{ height: 'calc(100dvh - env(safe-area-inset-top) - 120px - var(--bottom-nav-h, 0px) - var(--bottom-overlay-offset, 0px))' }}
-              onScroll={(e) => (scrollTopByTabRef.current.timeline = (e.currentTarget as HTMLDivElement).scrollTop)}
-            >
-              {timelinePanel}
-            </div>
-            <div
-              ref={plannedScrollRef}
-              className="w-1/3 overflow-y-auto overscroll-contain"
-              style={{ height: 'calc(100dvh - env(safe-area-inset-top) - 120px - var(--bottom-nav-h, 0px) - var(--bottom-overlay-offset, 0px))' }}
-              onScroll={(e) => (scrollTopByTabRef.current.planned = (e.currentTarget as HTMLDivElement).scrollTop)}
-            >
-              {listPanel('planned')}
-            </div>
-            <div
-              ref={completedScrollRef}
-              className="w-1/3 overflow-y-auto overscroll-contain"
-              style={{ height: 'calc(100dvh - env(safe-area-inset-top) - 120px - var(--bottom-nav-h, 0px) - var(--bottom-overlay-offset, 0px))' }}
-              onScroll={(e) => (scrollTopByTabRef.current.completed = (e.currentTarget as HTMLDivElement).scrollTop)}
-            >
-              {listPanel('completed')}
+            <div className="relative overflow-hidden">
+              <div
+                className="flex w-[300%]"
+                style={{
+                  transform: (() => {
+                    const base = dayViewMode === 'timeline' ? 0 : dayViewMode === 'planned' ? -33.3333 : -66.6666
+                    const dx = dayViewMode === 'timeline' ? Math.min(0, daySwipeX) : dayViewMode === 'completed' ? Math.max(0, daySwipeX) : daySwipeX
+                    return `translate3d(calc(${base}% + ${dx}px), 0, 0)`
+                  })(),
+                  transition: dayIsSwiping ? 'none' : 'transform 220ms cubic-bezier(0.16, 1, 0.3, 1)',
+                }}
+              >
+                <div
+                  ref={timelineScrollRef}
+                  className="w-1/3 overflow-y-auto overscroll-contain"
+                  style={{ height: 'calc(100dvh - env(safe-area-inset-top) - 120px - var(--bottom-nav-h, 0px) - var(--bottom-overlay-offset, 0px))' }}
+                  onScroll={(e) => (scrollTopByTabRef.current.timeline = (e.currentTarget as HTMLDivElement).scrollTop)}
+                >
+                  {timelinePanel}
+                </div>
+                <div
+                  ref={plannedScrollRef}
+                  className="w-1/3 overflow-y-auto overscroll-contain"
+                  style={{ height: 'calc(100dvh - env(safe-area-inset-top) - 120px - var(--bottom-nav-h, 0px) - var(--bottom-overlay-offset, 0px))' }}
+                  onScroll={(e) => (scrollTopByTabRef.current.planned = (e.currentTarget as HTMLDivElement).scrollTop)}
+                >
+                  {listPanel('planned')}
+                </div>
+                <div
+                  ref={completedScrollRef}
+                  className="w-1/3 overflow-y-auto overscroll-contain"
+                  style={{ height: 'calc(100dvh - env(safe-area-inset-top) - 120px - var(--bottom-nav-h, 0px) - var(--bottom-overlay-offset, 0px))' }}
+                  onScroll={(e) => (scrollTopByTabRef.current.completed = (e.currentTarget as HTMLDivElement).scrollTop)}
+                >
+                  {listPanel('completed')}
+                </div>
+              </div>
             </div>
           </div>
-        </div>
-      </div>
+        </>
+      )}
 
       <TimePickerModal
         open={timelineTimePickerOpen}
@@ -1187,8 +1363,23 @@ export function DayDetailView() {
         onClose={() => setTimelineTimePickerOpen(false)}
       />
 
-      {dayViewMode === 'timeline' && !isXlUp ? (
+      {unscheduledTooltip ? (
         <div
+          ref={unscheduledTooltipRef}
+          className="pointer-events-none fixed z-[70] w-[min(28rem,calc(100vw-2rem))] rounded-2xl bg-white px-4 py-3 text-center text-sm font-semibold text-emerald-500 shadow-[0_18px_40px_rgba(15,23,42,0.16)]"
+          style={
+            unscheduledTooltipPosition
+              ? { left: unscheduledTooltipPosition.left, top: unscheduledTooltipPosition.top, translate: '-50% -100%' }
+              : { left: '50%', bottom: 'calc(var(--bottom-nav-h, 0px) + var(--bottom-overlay-offset, 0px) + 88px)', translate: '-50% 0' }
+          }
+        >
+          {unscheduledTooltip}
+        </div>
+      ) : null}
+
+      {dayViewMode === 'timeline' && !isUnscheduledDay && !isXlUp ? (
+        <div
+          ref={unscheduledDockRootRef}
           data-unscheduled-dock-root
           className={`fixed z-40 flex items-start justify-end gap-[10px] md:hidden ${unscheduledDockOrigin}`}
           style={{
@@ -1340,6 +1531,7 @@ export function DayDetailView() {
                                             return (
 	                                              <button
 	                                                key={t.id}
+                                                  ref={flashTaskId === t.id ? flashTaskButtonRef : null}
 	                                            type="button"
 	                                            onClick={() => {
 	                                              if (taskTouchContextMenu.shouldIgnoreClick()) return
@@ -1353,8 +1545,8 @@ export function DayDetailView() {
 	                                              setTaskDragPreview(e.dataTransfer, e.currentTarget, e.clientX, e.clientY)
 	                                            }}
                                             className={`w-[33vw] max-w-[190px] select-none rounded-xl border border-black/10 px-2.5 py-1.5 text-left text-[10px] shadow-sm ${onText} ${
-                                              isCompleted ? 'saturate-[0.85] brightness-[0.97]' : ''
-                                            }`}
+                                              flashTaskId === t.id ? 'emma-flash-3 ' : ''
+                                            }${isCompleted ? 'saturate-[0.85] brightness-[0.97]' : ''}`}
                                             style={{ backgroundColor: bg }}
                                             title="타임라인으로 드래그해서 배치"
                                           >
@@ -1425,6 +1617,7 @@ export function DayDetailView() {
 
 function DayTimeline({
   items,
+  flashTaskId,
   onUpdate,
   onDropTask,
   onUnscheduleTask,
@@ -1444,6 +1637,7 @@ function DayTimeline({
   onInteractionLockChange,
 }: {
   items: TimelineItem[]
+  flashTaskId?: string | null
   onUpdate: (taskId: string, kind: TimelineKind, startMin: number, durationMin: number) => void
   onDropTask: (taskId: string, startMin: number, copyMode: boolean) => void
   onUnscheduleTask: (taskId: string, kind: TimelineKind) => void
@@ -2141,13 +2335,14 @@ function DayTimeline({
             const bg = it.subjectColor ?? (it.kind === 'actual' ? '#0f172a' : '#e2e8f0')
             const onText = pickOnColorText(bg)
             const isDragging = Boolean(active && active.id === it.id && active.kind === it.kind)
+            const isFlashing = flashTaskId === it.id
             const completedTone = it.completed ? 'saturate-[0.85] brightness-[0.97]' : ''
             const dragTone = isDragging ? (active?.outside ? 'ring-2 ring-indigo-500 opacity-80 shadow-xl' : 'ring-2 ring-black/20 shadow-lg') : ''
             return (
 	              <div
 	                key={`${it.kind}:${it.id}`}
 	                data-timeline-item="true"
-	                className={`absolute select-none rounded-xl border border-black/10 shadow-sm ${onText} ${completedTone} ${dragTone}`}
+	                className={`absolute select-none rounded-xl border border-black/10 shadow-sm ${onText} ${isFlashing ? 'emma-flash-3' : ''} ${completedTone} ${dragTone}`}
 	                style={{ top, height, left, right, backgroundColor: bg }}
 	                onPointerDown={(e) => handlePointerDown(e, it.id, it.kind, 'move')}
                     onContextMenu={(e) => onOpenTaskMenu?.(e, it.id)}

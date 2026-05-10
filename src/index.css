@@ -15,13 +15,13 @@ body,
 }
 
 .task-date-edit-trigger {
-  font-size: 17.1px;
-  line-height: 1.2;
+  font-size: 16px;
+  line-height: 1.5;
 }
 
 .task-date-edit-trigger svg {
-  height: 1.1em;
-  width: 1.1em;
+  height: 1em;
+  width: 1em;
 }
 
 .task-time-edit-text {
@@ -41,7 +41,7 @@ body,
   }
 
   .task-date-edit-trigger {
-    font-size: 14.4px;
+    font-size: 16px;
     line-height: 1.5;
   }
 }
