@@ -7,12 +7,13 @@ import { todayYmd, ymdToDate } from '../lib/dates'
 import { formatDurationKoFromMinutes, formatDurationKoFromSeconds, durationSecondsFromHmRange } from '../lib/time'
 import { formatDday } from '../lib/dday'
 import { Button } from '../components/ui'
+import { useTaskSelection } from '../components/TaskSelectionContext'
 import { usePlannerStore } from '../store/usePlannerStore'
 import { MobileTopBar } from '../components/MobileTopBar'
 import { IconCalendarMonth, IconCalendarWeek, IconPlus } from '../components/NavIcons'
 import { useTaskDialog } from '../components/TaskDialogContext'
 import { TimePickerModal } from '../components/TimePicker'
-import { getTaskDragId, setTaskDragData, setTaskDragPreview, syncTaskDropEffect } from '../lib/taskDrag'
+import { getTaskDragIds, setTaskDragData, setTaskDragPreview, syncTaskDropEffect } from '../lib/taskDrag'
 import { buildClipboardTaskAtTime, copyTaskToClipboard, pasteTaskFromClipboard } from '../lib/taskClipboard'
 import { useTouchContextMenu } from '../lib/useTouchContextMenu'
 
@@ -215,8 +216,10 @@ export function DayDetailView() {
   )
   const addTask = usePlannerStore((s) => s.addTask)
   const updateTask = usePlannerStore((s) => s.updateTask)
+  const updateTasks = usePlannerStore((s) => s.updateTasks)
   const duplicateTask = usePlannerStore((s) => s.duplicateTask)
   const deleteTask = usePlannerStore((s) => s.deleteTask)
+  const { handleSelectableTaskClick, isTaskSelected, prepareTaskDragSelection } = useTaskSelection()
   const { openTaskAdd, openTaskPreview } = useTaskDialog()
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
   const taskTouchContextMenu = useTouchContextMenu()
@@ -351,9 +354,17 @@ export function DayDetailView() {
   const [timelineTimePickerOpen, setTimelineTimePickerOpen] = useState(false)
   const [timelineTimePickerField, setTimelineTimePickerField] = useState<null | 'start' | 'end'>(null)
   const [unscheduledDock, setUnscheduledDock] = useState<{ v: 'top' | 'bottom'; h: 'right' }>({ v: 'bottom', h: 'right' })
+  const [nowTs, setNowTs] = useState(() => Date.now())
   const topDockY = 64
   const [isXlUp, setIsXlUp] = useState(false)
   const flashTaskButtonRef = useRef<HTMLButtonElement | null>(null)
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const syncNow = () => setNowTs(Date.now())
+    syncNow()
+    const timerId = window.setInterval(syncNow, 30_000)
+    return () => window.clearInterval(timerId)
+  }, [])
   useEffect(() => {
     if (typeof window === 'undefined' || !window.matchMedia) return
     const mq = window.matchMedia('(min-width: 1280px)')
@@ -557,6 +568,38 @@ export function DayDetailView() {
   const nextYmd = useMemo(() => (isUnscheduledDay ? '' : format(addDays(ymdToDate(date), 1), 'yyyy-MM-dd')), [date, isUnscheduledDay])
   const prevLabel = useMemo(() => (isUnscheduledDay ? '' : `${format(addDays(ymdToDate(date), -1), 'd')}일`), [date, isUnscheduledDay])
   const nextLabel = useMemo(() => (isUnscheduledDay ? '' : `${format(addDays(ymdToDate(date), 1), 'd')}일`), [date, isUnscheduledDay])
+  const isTodayPage = !isUnscheduledDay && date === todayYmd()
+
+  const timelineTopTooltips = useMemo(() => {
+    const messages: string[] = []
+    const currentDate = new Date(nowTs)
+    const currentMin = currentDate.getHours() * 60 + currentDate.getMinutes()
+    const currentHm = formatMeridiemHm(minutesToHm(currentMin)) ?? minutesToHm(currentMin)
+
+    if (isTodayPage) {
+      if (currentMin < timelineWindow.startMin) {
+        messages.push(`현재 시각은 ${currentHm}로 타임라인 시작 시간보다 빨라서 보이지 않습니다`)
+      } else if (currentMin >= timelineWindow.endMin) {
+        messages.push(`현재 시각은 ${currentHm}로 타임라인 종료 시간보다 늦어서 보이지 않습니다`)
+      }
+    }
+
+    let hiddenBeforeCount = 0
+    let hiddenAfterCount = 0
+    for (const item of timelineItems) {
+      const displayEndMin = item.startMin + timelineDisplayDurationMin(item.durationMin)
+      if (displayEndMin <= timelineWindow.startMin) hiddenBeforeCount += 1
+      else if (item.startMin >= timelineWindow.endMin) hiddenAfterCount += 1
+    }
+    if (hiddenBeforeCount > 0) {
+      messages.push(`${hiddenBeforeCount}개의 일정이 타임라인 시작 시간보다 빨라서 보이지 않습니다`)
+    }
+    if (hiddenAfterCount > 0) {
+      messages.push(`${hiddenAfterCount}개의 일정이 타임라인 종료 시간보다 늦어서 보이지 않습니다`)
+    }
+
+    return messages
+  }, [isTodayPage, nowTs, timelineItems, timelineWindow.endMin, timelineWindow.startMin])
 
   const openTimelineTimePicker = (field: 'start' | 'end') => {
     setTimelineTimePickerField(field)
@@ -777,6 +820,7 @@ export function DayDetailView() {
       <DayTimeline
         items={timelineItems}
         flashTaskId={flashTaskId}
+        topTooltips={timelineTopTooltips}
         viewStartMin={timelineWindow.startMin}
         viewEndMin={timelineWindow.endMin}
         onChangeWindow={(startMin, endMin) => setTimelineWindow({ startMin, endMin })}
@@ -837,15 +881,14 @@ export function DayDetailView() {
             updateTask(taskId, { plannedStartTime: startHm, plannedSeconds: durationMin * 60 })
           }
         }}
-        onDropTask={(taskId, startMin, copyMode) => {
-          const task = tasks.find((x) => x.id === taskId)
-          if (!task) return
+        onDropTask={(taskIds, startMin, copyMode) => {
+          if (taskIds.length === 0) return
           // 시간미정 -> 타임라인 배치 시 "소요시간"은 덮어쓰지 않음 (있으면 유지, 없으면 undefined 유지)
           if (copyMode) {
-            duplicateTask(taskId, { plannedStartTime: minutesToHm(startMin) })
+            taskIds.forEach((taskId) => duplicateTask(taskId, { plannedStartTime: minutesToHm(startMin) }))
             return
           }
-          updateTask(taskId, { plannedStartTime: minutesToHm(startMin) })
+          updateTasks(taskIds, { plannedStartTime: minutesToHm(startMin) })
         }}
         onAddRange={(startMin, endMin) => {
           const start = snap10(Math.min(startMin, endMin))
@@ -942,15 +985,17 @@ export function DayDetailView() {
                   <button
                     key={t.id}
                     type="button"
-                    onClick={() => {
+                    onClick={(e) => {
                       if (taskTouchContextMenu.shouldIgnoreClick()) return
-                      openTaskPreview(t.id)
+                      handleSelectableTaskClick(e, t.id, () => openTaskPreview(t.id))
                     }}
                     onContextMenu={(e) => openDayTaskMenu(e, t.id)}
                     {...taskTouchContextMenu.bind(`day-list:${t.id}`, ({ x, y }) => openDayTaskMenuAt(x, y, t.id))}
+                    data-task-selectable="true"
+                    data-task-id={t.id}
                     className={`grid w-full select-none grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 px-2 py-3 text-slate-900 hover:bg-slate-50 ${
                       isCompleted ? 'opacity-75' : ''
-                    }`}
+                    } ${isTaskSelected(t.id) ? 'ring-2 ring-inset ring-slate-900' : ''}`}
                   >
                     <span className="flex min-w-0 flex-col gap-0.5">
                       <span className="flex min-w-0 items-center gap-2">
@@ -1485,10 +1530,10 @@ export function DayDetailView() {
                 }}
                 onDrop={(e) => {
                   e.preventDefault()
-                  const taskId = getTaskDragId(e.dataTransfer)
-                  if (!taskId) return
-                  if (e.altKey) duplicateTask(taskId, { plannedStartTime: undefined })
-                  else updateTask(taskId, { plannedStartTime: undefined })
+                  const taskIds = getTaskDragIds(e.dataTransfer)
+                  if (!taskIds.length) return
+                  if (e.altKey) taskIds.forEach((taskId) => duplicateTask(taskId, { plannedStartTime: undefined }))
+                  else updateTasks(taskIds, { plannedStartTime: undefined })
                 }}
               >
                 {dayUnscheduled.length === 0 ? (
@@ -1533,20 +1578,25 @@ export function DayDetailView() {
 	                                                key={t.id}
                                                   ref={flashTaskId === t.id ? flashTaskButtonRef : null}
 	                                            type="button"
-	                                            onClick={() => {
+	                                            onClick={(e) => {
 	                                              if (taskTouchContextMenu.shouldIgnoreClick()) return
-	                                              openTaskPreview(t.id)
+	                                              handleSelectableTaskClick(e, t.id, () => openTaskPreview(t.id))
 	                                            }}
                                                 onContextMenu={(e) => openDayTaskMenu(e, t.id)}
 	                                            {...taskTouchContextMenu.bind(`day-bubble:${t.id}`, ({ x, y }) => openDayTaskMenuAt(x, y, t.id))}
 	                                            draggable
 	                                            onDragStart={(e) => {
-	                                              setTaskDragData(e.dataTransfer, t.id)
+	                                              const dragTaskIds = prepareTaskDragSelection(t.id)
+	                                              setTaskDragData(e.dataTransfer, t.id, dragTaskIds)
 	                                              setTaskDragPreview(e.dataTransfer, e.currentTarget, e.clientX, e.clientY)
 	                                            }}
+                                            data-task-selectable="true"
+                                            data-task-id={t.id}
                                             className={`w-[33vw] max-w-[190px] select-none rounded-xl border border-black/10 px-2.5 py-1.5 text-left text-[10px] shadow-sm ${onText} ${
                                               flashTaskId === t.id ? 'emma-flash-3 ' : ''
-                                            }${isCompleted ? 'saturate-[0.85] brightness-[0.97]' : ''}`}
+                                            }${isCompleted ? 'saturate-[0.85] brightness-[0.97]' : ''} ${
+                                              isTaskSelected(t.id) ? 'ring-2 ring-slate-900 ring-offset-1' : ''
+                                            }`}
                                             style={{ backgroundColor: bg }}
                                             title="타임라인으로 드래그해서 배치"
                                           >
@@ -1618,6 +1668,7 @@ export function DayDetailView() {
 function DayTimeline({
   items,
   flashTaskId,
+  topTooltips,
   onUpdate,
   onDropTask,
   onUnscheduleTask,
@@ -1638,8 +1689,9 @@ function DayTimeline({
 }: {
   items: TimelineItem[]
   flashTaskId?: string | null
+  topTooltips?: string[]
   onUpdate: (taskId: string, kind: TimelineKind, startMin: number, durationMin: number) => void
-  onDropTask: (taskId: string, startMin: number, copyMode: boolean) => void
+  onDropTask: (taskIds: string[], startMin: number, copyMode: boolean) => void
   onUnscheduleTask: (taskId: string, kind: TimelineKind) => void
   onDuplicateTask: (taskId: string, kind: TimelineKind, startMin: number, durationMin: number) => void
   onDuplicateTaskAsUnscheduled: (taskId: string, kind: TimelineKind) => void
@@ -2105,15 +2157,15 @@ function DayTimeline({
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault()
-    const taskId = getTaskDragId(e.dataTransfer)
-    if (!taskId) return
+    const taskIds = getTaskDragIds(e.dataTransfer)
+    if (!taskIds.length) return
     const el = containerRef.current
     if (!el) return
     const rect = el.getBoundingClientRect()
     const yInViewport = e.clientY - rect.top
     const minutesRaw = yInViewport / pxPerMin
     const dropStart = snap10(startMin + minutesRaw)
-    onDropTask(taskId, dropStart, e.altKey)
+    onDropTask(taskIds, dropStart, e.altKey)
   }
 
   const dragGhost = useMemo(() => {
@@ -2216,6 +2268,18 @@ function DayTimeline({
           </div>
           <div className="h-1.5 w-10 rounded-full bg-slate-300" />
         </div>
+        {topTooltips?.length ? (
+          <div className="pointer-events-none absolute left-2 right-2 top-7 z-30 flex flex-col items-center gap-2">
+            {topTooltips.map((message, index) => (
+              <div
+                key={`${index}:${message}`}
+                className="w-full max-w-md rounded-2xl bg-white/96 px-4 py-2.5 text-center text-sm font-semibold text-emerald-600 shadow-[0_18px_40px_rgba(15,23,42,0.12)] ring-1 ring-black/5 backdrop-blur"
+              >
+                {message}
+              </div>
+            ))}
+          </div>
+        ) : null}
         <div className="relative" style={{ height: viewHeight }}>
           {rangeSelect?.active ? (
             <div

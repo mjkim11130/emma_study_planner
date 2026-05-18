@@ -7,11 +7,12 @@ import { useConfirmDialog } from '../components/ConfirmDialog'
 import { MobileTopBar } from '../components/MobileTopBar'
 import { IconCalendarMonth, IconCalendarViewDay, IconChecklist, IconPlus } from '../components/NavIcons'
 import { Button } from '../components/ui'
+import { useTaskSelection } from '../components/TaskSelectionContext'
 import { todayYmd } from '../lib/dates'
 import { useTaskDialog } from '../components/TaskDialogContext'
 import { usePlannerStore } from '../store/usePlannerStore'
 import type { StudyTask } from '../store/types'
-import { getTaskDragId, setTaskDragData, setTaskDragPreview, syncTaskDropEffect } from '../lib/taskDrag'
+import { getTaskDragIds, setTaskDragData, setTaskDragPreview, syncTaskDropEffect } from '../lib/taskDrag'
 import { copyTaskToClipboard, getTaskClipboard, pasteTaskFromClipboard } from '../lib/taskClipboard'
 import { useTouchContextMenu } from '../lib/useTouchContextMenu'
 
@@ -79,9 +80,10 @@ export function WeekView() {
   const subjects = usePlannerStore((s) => s.subjects)
   const tasks = usePlannerStore((s) => s.tasks)
   const addTask = usePlannerStore((s) => s.addTask)
-  const updateTask = usePlannerStore((s) => s.updateTask)
+  const updateTasks = usePlannerStore((s) => s.updateTasks)
   const duplicateTask = usePlannerStore((s) => s.duplicateTask)
   const deleteTask = usePlannerStore((s) => s.deleteTask)
+  const { handleSelectableTaskClick, isTaskSelected, prepareTaskDragSelection } = useTaskSelection()
 
   const weekStartDate = useMemo(() => {
     const parsed = weekStartParam ? parseISO(weekStartParam) : null
@@ -297,21 +299,24 @@ export function WeekView() {
       <button
         key={t.id}
         type="button"
-        onClick={() => {
+        onClick={(e) => {
           if (taskTouchContextMenu.shouldIgnoreClick()) return
-          openTaskPreview(t.id)
+          handleSelectableTaskClick(e, t.id, () => openTaskPreview(t.id))
         }}
         draggable
         onDragStart={(e) => {
-          setTaskDragData(e.dataTransfer, t.id)
+          const dragTaskIds = prepareTaskDragSelection(t.id)
+          setTaskDragData(e.dataTransfer, t.id, dragTaskIds)
           setTaskDragPreview(e.dataTransfer, e.currentTarget, e.clientX, e.clientY)
         }}
         onContextMenu={(e) => openTaskMenu(e, t)}
         {...taskTouchContextMenu.bind(`week-task:${t.id}`, ({ x, y }) => openTaskMenuAt(x, y, t))}
         data-task-card="true"
+        data-task-selectable="true"
+        data-task-id={t.id}
         className={`flex w-full select-none items-center gap-1 rounded-[4px] border border-black/10 px-1.5 py-1 text-left text-[11px] font-semibold leading-tight shadow-sm ${
           flashTaskId === t.id ? 'emma-flash-3' : ''
-        }`}
+        } ${isTaskSelected(t.id) ? 'ring-2 ring-slate-900 ring-offset-1' : ''}`}
         style={{ backgroundColor: bg, color: onText }}
       >
         <span className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-clip">{t.title || '제목 없음'}</span>
@@ -409,11 +414,11 @@ export function WeekView() {
       onDrop={(e) => {
         e.preventDefault()
         setDragOverKey(null)
-        const taskId = getTaskDragId(e.dataTransfer)
-        if (!taskId) return
+        const taskIds = getTaskDragIds(e.dataTransfer)
+        if (!taskIds.length) return
         const nextDate = keyId === '__unassigned__' ? '' : keyId
-        if (e.altKey) duplicateTask(taskId, { date: nextDate })
-        else updateTask(taskId, { date: nextDate })
+        if (e.altKey) taskIds.forEach((taskId) => duplicateTask(taskId, { date: nextDate }))
+        else updateTasks(taskIds, { date: nextDate })
       }}
       onContextMenu={onContextMenu}
     >

@@ -64,7 +64,9 @@ type PlannerState = {
   }) => string
   duplicateTask: (id: string, patch?: Partial<Omit<StudyTask, 'id' | 'createdAt' | 'updatedAt'>>) => string | null
   updateTask: (id: string, patch: Partial<Omit<StudyTask, 'id' | 'createdAt'>>) => void
+  updateTasks: (ids: string[], patch: Partial<Omit<StudyTask, 'id' | 'createdAt'>>) => void
   deleteTask: (id: string) => void
+  deleteTasks: (ids: string[]) => void
   replaceSeasonData: (input: {
     examId: string
     subjects: ImportedSeasonSubject[]
@@ -93,6 +95,45 @@ function computeActualTimesFromPlanned(input: { plannedStartTime?: string; plann
 
 function nowIso() {
   return new Date().toISOString()
+}
+
+function buildPatchedTask(current: StudyTask, patch: Partial<Omit<StudyTask, 'id' | 'createdAt'>>, updatedAt = nowIso()) {
+  const baseNext = { ...current, ...patch, updatedAt }
+  const recordCompleteOnly = Boolean(baseNext.recordCompleteOnly)
+  const impliedActualTimes = recordCompleteOnly
+    ? computeActualTimesFromPlanned({ plannedStartTime: baseNext.plannedStartTime, plannedSeconds: baseNext.plannedSeconds })
+    : null
+  const next = impliedActualTimes
+    ? {
+        ...baseNext,
+        actualStartTime: impliedActualTimes.actualStartTime,
+        actualEndTime: impliedActualTimes.actualEndTime,
+        actualSeconds: undefined,
+      }
+    : baseNext
+  const invalidActualRange = isInvalidTimeRange(next.actualStartTime, next.actualEndTime)
+  const actualSeconds = recordCompleteOnly
+    ? undefined
+    : invalidActualRange
+      ? undefined
+      : patch.actualSeconds !== undefined
+        ? patch.actualSeconds
+        : computeActualSeconds(next.actualStartTime, next.actualEndTime)
+  const status =
+    recordCompleteOnly
+      ? 'completed'
+      : invalidActualRange
+        ? 'pending'
+        : next.actualStartTime && next.actualEndTime
+          ? 'completed'
+          : actualSeconds !== undefined
+            ? 'completed'
+            : (next.status ?? 'pending')
+  return {
+    task: { ...next, actualSeconds, status },
+    examId: patch.examId ?? current.examId,
+    subjectId: patch.subjectId ?? current.subjectId,
+  }
 }
 
 function nextSeasonName(existingNames: string[], base = '새 시즌') {
@@ -324,48 +365,38 @@ export const usePlannerStore = create<PlannerState>()(
         set((state) => {
           const current = state.tasks.find((t) => t.id === id)
           if (!current) return state
-          const nextExamId = patch.examId ?? current.examId
-          const nextSubjectId = patch.subjectId ?? current.subjectId
+          const patched = buildPatchedTask(current, patch)
           return {
-            lastUsedSubjectIdByExam: { ...state.lastUsedSubjectIdByExam, [nextExamId]: nextSubjectId },
-            tasks: state.tasks.map((t) => {
-              if (t.id !== id) return t
-              const baseNext = { ...t, ...patch, updatedAt: nowIso() }
-              const recordCompleteOnly = Boolean(baseNext.recordCompleteOnly)
-              const impliedActualTimes = recordCompleteOnly
-                ? computeActualTimesFromPlanned({ plannedStartTime: baseNext.plannedStartTime, plannedSeconds: baseNext.plannedSeconds })
-                : null
-              const next = impliedActualTimes
-                ? {
-                    ...baseNext,
-                    actualStartTime: impliedActualTimes.actualStartTime,
-                    actualEndTime: impliedActualTimes.actualEndTime,
-                    actualSeconds: undefined,
-                  }
-                : baseNext
-              const invalidActualRange = isInvalidTimeRange(next.actualStartTime, next.actualEndTime)
-              const actualSeconds = recordCompleteOnly
-                ? undefined
-                : invalidActualRange
-                  ? undefined
-                  : patch.actualSeconds !== undefined
-                    ? patch.actualSeconds
-                    : computeActualSeconds(next.actualStartTime, next.actualEndTime)
-              const status =
-                recordCompleteOnly
-                  ? 'completed'
-                  : invalidActualRange
-                  ? 'pending'
-                  : next.actualStartTime && next.actualEndTime
-                    ? 'completed'
-                    : actualSeconds !== undefined
-                      ? 'completed'
-                      : (next.status ?? 'pending')
-              return { ...next, actualSeconds, status }
-            }),
+            lastUsedSubjectIdByExam: { ...state.lastUsedSubjectIdByExam, [patched.examId]: patched.subjectId },
+            tasks: state.tasks.map((t) => (t.id === id ? patched.task : t)),
           }
         }),
+      updateTasks: (ids, patch) =>
+        set((state) => {
+          const scopedIds = Array.from(new Set(ids.filter(Boolean)))
+          if (scopedIds.length === 0) return state
+          const idSet = new Set(scopedIds)
+          const updatedAt = nowIso()
+          let didChange = false
+          const nextLastUsed = { ...state.lastUsedSubjectIdByExam }
+          const nextTasks = state.tasks.map((t) => {
+            if (!idSet.has(t.id)) return t
+            didChange = true
+            const patched = buildPatchedTask(t, patch, updatedAt)
+            nextLastUsed[patched.examId] = patched.subjectId
+            return patched.task
+          })
+          if (!didChange) return state
+          return { lastUsedSubjectIdByExam: nextLastUsed, tasks: nextTasks }
+        }),
       deleteTask: (id) => set((state) => ({ tasks: state.tasks.filter((t) => t.id !== id) })),
+      deleteTasks: (ids) =>
+        set((state) => {
+          const scopedIds = Array.from(new Set(ids.filter(Boolean)))
+          if (scopedIds.length === 0) return state
+          const idSet = new Set(scopedIds)
+          return { tasks: state.tasks.filter((t) => !idSet.has(t.id)) }
+        }),
       replaceSeasonData: ({ examId, subjects, tasks, subjectOrderSourceIds, lastUsedSourceSubjectId }) =>
         set((state) => {
           const sourceIds = new Set<string>()

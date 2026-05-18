@@ -10,10 +10,11 @@ import { TaskDialogContext, type TaskDialogAddCommitPayload } from './TaskDialog
 import { TaskDialog } from './TaskDialog'
 import { SubjectDialog } from './SubjectDialog'
 import { IconCalendarMonth, IconCalendarViewDay, IconCalendarWeek, IconPlus } from './NavIcons'
-import { getTaskDragId, setTaskDragData, setTaskDragPreview, syncTaskDropEffect } from '../lib/taskDrag'
+import { getTaskDragIds, setTaskDragData, setTaskDragPreview, syncTaskDropEffect } from '../lib/taskDrag'
 import { ContextMenu, type ContextMenuItem, type ContextMenuState } from './ContextMenu'
 import { copyTaskToClipboard, getTaskClipboard, pasteTaskFromClipboard } from '../lib/taskClipboard'
 import { useTouchContextMenu } from '../lib/useTouchContextMenu'
+import { TaskSelectionProvider, useTaskSelection } from './TaskSelectionContext'
 
 export const SidebarToggleContext = createContext<{ open: boolean; toggle: () => void } | null>(null)
 
@@ -112,7 +113,9 @@ function NavItem({
 export function AppLayout() {
   return (
     <ConfirmDialogProvider>
-      <AppLayoutContent />
+      <TaskSelectionProvider>
+        <AppLayoutContent />
+      </TaskSelectionProvider>
     </ConfirmDialogProvider>
   )
 }
@@ -131,8 +134,10 @@ function AppLayoutContent() {
   const tasks = usePlannerStore((s) => s.tasks)
   const addTask = usePlannerStore((s) => s.addTask)
   const updateTask = usePlannerStore((s) => s.updateTask)
+  const updateTasks = usePlannerStore((s) => s.updateTasks)
   const duplicateTask = usePlannerStore((s) => s.duplicateTask)
   const deleteTask = usePlannerStore((s) => s.deleteTask)
+  const { handleSelectableTaskClick, isTaskSelected, prepareTaskDragSelection } = useTaskSelection()
   const lastUsedSubjectIdByExam = usePlannerStore((s) => s.lastUsedSubjectIdByExam)
   const isCalendarPage = location.pathname === '/' || location.pathname.startsWith('/calendar')
   const isWeekPage = location.pathname.startsWith('/week')
@@ -476,10 +481,10 @@ function AppLayoutContent() {
                   }}
                   onDrop={(e) => {
                     e.preventDefault()
-                    const taskId = getTaskDragId(e.dataTransfer)
-                    if (!taskId) return
-                    if (e.altKey) duplicateTask(taskId, { date: '' })
-                    else updateTask(taskId, { date: '' })
+                    const taskIds = getTaskDragIds(e.dataTransfer)
+                    if (!taskIds.length) return
+                    if (e.altKey) taskIds.forEach((taskId) => duplicateTask(taskId, { date: '' }))
+                    else updateTasks(taskIds, { date: '' })
                   }}
                 >
                   <div className="h-full min-h-0 overflow-y-auto overscroll-contain pr-1">
@@ -517,18 +522,23 @@ function AppLayoutContent() {
                                     <button
                                       key={t.id}
                                       type="button"
-                                      onClick={() => {
+                                      onClick={(e) => {
                                         if (taskTouchContextMenu.shouldIgnoreClick()) return
-                                        openTaskPreview(t.id)
+                                        handleSelectableTaskClick(e, t.id, () => openTaskPreview(t.id))
                                       }}
                                       onContextMenu={(e) => openSidebarTaskMenu(e, t.id)}
                                       draggable
                                       onDragStart={(e) => {
-                                        setTaskDragData(e.dataTransfer, t.id)
+                                        const dragTaskIds = prepareTaskDragSelection(t.id)
+                                        setTaskDragData(e.dataTransfer, t.id, dragTaskIds)
                                         setTaskDragPreview(e.dataTransfer, e.currentTarget, e.clientX, e.clientY)
                                       }}
                                       {...taskTouchContextMenu.bind(`sidebar-unassigned:${t.id}`, ({ x, y }) => openSidebarTaskMenuAt(x, y, t.id))}
-                                      className="block min-w-0 select-none rounded-lg px-3 py-2 text-left text-[12px] leading-tight"
+                                      data-task-selectable="true"
+                                      data-task-id={t.id}
+                                      className={`block min-w-0 select-none rounded-lg px-3 py-2 text-left text-[12px] leading-tight ring-offset-1 ${
+                                        isTaskSelected(t.id) ? 'ring-2 ring-slate-900' : ''
+                                      }`}
                                       style={{ background: bg, color: textColor }}
                                     >
                                       <div className="flex items-center justify-between gap-2">
@@ -588,10 +598,10 @@ function AppLayoutContent() {
                   }}
                   onDrop={(e) => {
                     e.preventDefault()
-                    const taskId = getTaskDragId(e.dataTransfer)
-                    if (!taskId) return
-                    if (e.altKey) duplicateTask(taskId, { plannedStartTime: undefined })
-                    else updateTask(taskId, { plannedStartTime: undefined })
+                    const taskIds = getTaskDragIds(e.dataTransfer)
+                    if (!taskIds.length) return
+                    if (e.altKey) taskIds.forEach((taskId) => duplicateTask(taskId, { plannedStartTime: undefined }))
+                    else updateTasks(taskIds, { plannedStartTime: undefined })
                   }}
                 >
                   <div className="h-full min-h-0 overflow-y-auto overscroll-contain pr-1">
@@ -647,20 +657,23 @@ function AppLayoutContent() {
                                       <button
                                         key={t.id}
                                         type="button"
-                                        onClick={() => {
+                                        onClick={(e) => {
                                           if (taskTouchContextMenu.shouldIgnoreClick()) return
-                                          openTaskPreview(t.id)
+                                          handleSelectableTaskClick(e, t.id, () => openTaskPreview(t.id))
                                         }}
                                         onContextMenu={(e) => openSidebarTaskMenu(e, t.id)}
                                         draggable
                                         onDragStart={(e) => {
-                                          setTaskDragData(e.dataTransfer, t.id)
+                                          const dragTaskIds = prepareTaskDragSelection(t.id)
+                                          setTaskDragData(e.dataTransfer, t.id, dragTaskIds)
                                           setTaskDragPreview(e.dataTransfer, e.currentTarget, e.clientX, e.clientY)
                                         }}
                                         {...taskTouchContextMenu.bind(`sidebar-day:${t.id}`, ({ x, y }) => openSidebarTaskMenuAt(x, y, t.id))}
                                         className={`block w-full min-w-0 select-none rounded-lg px-3 py-2 text-left text-[12px] leading-tight shadow-sm ${
                                           isCompleted ? 'saturate-[0.85] brightness-[0.97]' : ''
-                                        }`}
+                                        } ${isTaskSelected(t.id) ? 'ring-2 ring-slate-900 ring-offset-1' : ''}`}
+                                        data-task-selectable="true"
+                                        data-task-id={t.id}
                                         style={{ background: bg, color: textColor }}
                                         title="타임라인으로 드래그해서 배치"
                                       >

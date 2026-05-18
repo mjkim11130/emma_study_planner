@@ -1,9 +1,12 @@
 import type { DragEvent } from 'react'
 
 export const TASK_DRAG_MIME = 'text/emma-task-id'
+export const TASK_DRAG_IDS_MIME = 'text/emma-task-ids'
 
-export function setTaskDragData(dataTransfer: DataTransfer, taskId: string) {
+export function setTaskDragData(dataTransfer: DataTransfer, taskId: string, taskIds?: string[]) {
   dataTransfer.setData(TASK_DRAG_MIME, taskId)
+  const scopedIds = Array.from(new Set((taskIds ?? [taskId]).filter(Boolean)))
+  dataTransfer.setData(TASK_DRAG_IDS_MIME, JSON.stringify(scopedIds.length ? scopedIds : [taskId]))
   dataTransfer.effectAllowed = 'copyMove'
 }
 
@@ -38,6 +41,23 @@ export function setTaskDragPreview(dataTransfer: DataTransfer, sourceEl: HTMLEle
 
 export function getTaskDragId(dataTransfer: DataTransfer) {
   return dataTransfer.getData(TASK_DRAG_MIME)
+}
+
+export function getTaskDragIds(dataTransfer: DataTransfer) {
+  const raw = dataTransfer.getData(TASK_DRAG_IDS_MIME)
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw)
+      if (Array.isArray(parsed)) {
+        const ids = parsed.filter((id) => typeof id === 'string' && id.trim())
+        if (ids.length) return Array.from(new Set(ids))
+      }
+    } catch {
+      // ignore malformed payload and fall back to single-id mode
+    }
+  }
+  const single = getTaskDragId(dataTransfer)
+  return single ? [single] : []
 }
 
 export function syncTaskDropEffect(e: DragEvent) {

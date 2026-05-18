@@ -33,6 +33,7 @@ import { formatDday } from '../lib/dday'
 import { Button } from '../components/ui'
 import { DurationPickerButton } from '../components/DurationPicker'
 import { TimePickerModal } from '../components/TimePicker'
+import { useTaskSelection } from '../components/TaskSelectionContext'
 import { usePlannerStore } from '../store/usePlannerStore'
 import { MobileTopBar } from '../components/MobileTopBar'
 import { IconCalendarViewDay, IconCalendarWeek, IconChecklist, IconPlus } from '../components/NavIcons'
@@ -41,7 +42,7 @@ import { TaskDialogShell } from '../components/TaskDialogShell'
 import type { StudyTask } from '../store/types'
 import { buildTimeSummaryNode, formatDurationPreciseKo } from '../lib/taskTimeSummary'
 import { useEscapeKey } from '../lib/useEscapeKey'
-import { getTaskDragId, setTaskDragData, setTaskDragPreview, syncTaskDropEffect } from '../lib/taskDrag'
+import { getTaskDragIds, setTaskDragData, setTaskDragPreview, syncTaskDropEffect } from '../lib/taskDrag'
 import { copyTaskToClipboard, getTaskClipboard, pasteTaskFromClipboard } from '../lib/taskClipboard'
 import { useTouchContextMenu } from '../lib/useTouchContextMenu'
 
@@ -211,8 +212,10 @@ export function CalendarView() {
   const lastUsedSubjectIdByExam = usePlannerStore((s) => s.lastUsedSubjectIdByExam)
   const addTask = usePlannerStore((s) => s.addTask)
   const updateTask = usePlannerStore((s) => s.updateTask)
+  const updateTasks = usePlannerStore((s) => s.updateTasks)
   const duplicateTask = usePlannerStore((s) => s.duplicateTask)
   const deleteTask = usePlannerStore((s) => s.deleteTask)
+  const { handleSelectableTaskClick, isTaskSelected, prepareTaskDragSelection } = useTaskSelection()
   const [startOpen, setStartOpen] = useState(false)
   const [startDockTooltip, setStartDockTooltip] = useState<string | null>(null)
   const [startDockTooltipPosition, setStartDockTooltipPosition] = useState<{ left: number; top: number } | null>(null)
@@ -1088,9 +1091,13 @@ export function CalendarView() {
   useEscapeKey(Boolean(isEditingPreview && datePickerField), () => setDatePickerField(null), 75)
   useEscapeKey(Boolean(isEditingPreview && editExitConfirmOpen), () => setEditExitConfirmOpen(false), 80)
 
-  const applyDateDrop = (taskId: string, nextDate: string, duplicate: boolean) => {
-    if (duplicate) duplicateTask(taskId, { date: nextDate })
-    else updateTask(taskId, { date: nextDate })
+  const applyDateDrop = (taskIds: string[], nextDate: string, duplicate: boolean) => {
+    if (taskIds.length === 0) return
+    if (duplicate) {
+      taskIds.forEach((taskId) => duplicateTask(taskId, { date: nextDate }))
+      return
+    }
+    updateTasks(taskIds, { date: nextDate })
   }
 
   const submitPreviewEdit = () => {
@@ -1487,8 +1494,8 @@ export function CalendarView() {
                 }}
                 onDrop={(e) => {
                   e.preventDefault()
-                  const taskId = getTaskDragId(e.dataTransfer)
-                  if (taskId) applyDateDrop(taskId, ymd, e.altKey)
+                  const taskIds = getTaskDragIds(e.dataTransfer)
+                  if (taskIds.length) applyDateDrop(taskIds, ymd, e.altKey)
                   setDragOverDate(null)
                 }}
                 onContextMenu={(e) => openMonthDateMenu(e, ymd)}
@@ -1554,19 +1561,22 @@ export function CalendarView() {
                         onClick={(e) => {
                           e.stopPropagation()
                           if (taskTouchContextMenu.shouldIgnoreClick()) return
-                          openPreviewTask(t.id)
+                          handleSelectableTaskClick(e, t.id, () => openPreviewTask(t.id))
                         }}
                         draggable
                         onDragStart={(e) => {
-                          setTaskDragData(e.dataTransfer, t.id)
+                          const dragTaskIds = prepareTaskDragSelection(t.id)
+                          setTaskDragData(e.dataTransfer, t.id, dragTaskIds)
                           setTaskDragPreview(e.dataTransfer, e.currentTarget, e.clientX, e.clientY)
                         }}
                         onDragEnd={() => setDragOverDate(null)}
                         onContextMenu={(e) => openMonthTaskMenu(e, t)}
                         {...taskTouchContextMenu.bind(`month-task:${t.id}`, ({ x, y }) => openMonthTaskMenuAt(x, y, t))}
+                        data-task-selectable="true"
+                        data-task-id={t.id}
                         className={`box-border block w-full select-none rounded-[3px] py-[1px] pl-1.5 pr-0 text-left text-[11px] leading-tight active:cursor-grabbing md:py-0.5 md:pl-2 md:text-[11px] ${
 	                          flashTaskId === t.id ? 'emma-flash-3' : ''
-	                        }`}
+	                        } ${isTaskSelected(t.id) ? 'ring-2 ring-slate-900 ring-offset-1' : ''}`}
                         data-completed={isCompleted ? 'true' : 'false'}
                         style={{ background: bg, color: textColor, filter: isCompleted ? 'saturate(0.85) brightness(0.97)' : undefined }}
                       >
@@ -1859,29 +1869,50 @@ export function CalendarView() {
 	                              )
 	                              const isCompleted = previewTask.status === 'completed' || hasAnyRecord
 	                              const color = previewSubject?.color ?? '#94a3b8'
-	                              return isCompleted ? (
-	                                <span
+	                              return (
+	                                <button
+	                                  type="button"
 	                                  className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-[5px]"
-	                                  style={{ background: color }}
-	                                  aria-hidden="true"
+	                                  style={isCompleted ? { background: color } : { borderColor: color, borderWidth: 2, borderStyle: 'solid' }}
+	                                  aria-label={isCompleted ? '완료 해제' : '완료 처리'}
+	                                  onClick={() => {
+	                                    const applyPatch = (patch: Partial<Omit<StudyTask, 'id' | 'createdAt'>>) => {
+	                                      if (isAddMode || isEditingPreview) {
+	                                        patchPreviewTask(patch)
+	                                        return
+	                                      }
+	                                      if (!previewTask) return
+	                                      updateTask(previewTask.id, patch)
+	                                    }
+	                                    if (isCompleted) {
+	                                      applyPatch({
+	                                        status: 'pending',
+	                                        recordCompleteOnly: false,
+	                                        actualStartTime: undefined,
+	                                        actualEndTime: undefined,
+	                                        actualSeconds: undefined,
+	                                      })
+	                                    } else {
+	                                      const hasRecordedTime =
+	                                        Boolean(previewTask.actualStartTime && previewTask.actualEndTime) ||
+	                                        typeof previewTask.actualSeconds === 'number'
+	                                      applyPatch({ status: 'completed', recordCompleteOnly: !hasRecordedTime })
+	                                    }
+	                                  }}
 	                                >
-	                                  <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 text-white">
-	                                    <path
-	                                      d="M20 6L9 17l-5-5"
-	                                      fill="none"
-	                                      stroke="currentColor"
-	                                      strokeWidth="3"
-	                                      strokeLinecap="round"
-	                                      strokeLinejoin="round"
-	                                    />
-	                                  </svg>
-	                                </span>
-	                              ) : (
-	                                <span
-	                                  className="inline-block h-4 w-4 shrink-0 rounded-[5px] border-2"
-	                                  style={{ borderColor: color }}
-	                                  aria-hidden="true"
-	                                />
+	                                  {isCompleted ? (
+	                                    <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 text-white" aria-hidden="true">
+	                                      <path
+	                                        d="M20 6L9 17l-5-5"
+	                                        fill="none"
+	                                        stroke="currentColor"
+	                                        strokeWidth="3"
+	                                        strokeLinecap="round"
+	                                        strokeLinejoin="round"
+	                                      />
+	                                    </svg>
+	                                  ) : null}
+	                                </button>
 	                              )
 	                            })()}
 	                            <span className="truncate text-sm font-semibold text-slate-500">{previewSubject?.name ?? '과목'}</span>
@@ -2851,8 +2882,8 @@ export function CalendarView() {
                 }}
                 onDrop={(e) => {
                   e.preventDefault()
-                  const taskId = getTaskDragId(e.dataTransfer)
-                  if (taskId) applyDateDrop(taskId, '', e.altKey)
+                  const taskIds = getTaskDragIds(e.dataTransfer)
+                  if (taskIds.length) applyDateDrop(taskIds, '', e.altKey)
                   setDragOverDate(null)
                 }}
               >
@@ -2893,19 +2924,22 @@ export function CalendarView() {
                                       onClick={(e) => {
                                         e.stopPropagation()
                                         if (taskTouchContextMenu.shouldIgnoreClick()) return
-                                        openPreviewTask(t.id)
+                                        handleSelectableTaskClick(e, t.id, () => openPreviewTask(t.id))
                                       }}
                                       draggable
                                       onDragStart={(e) => {
-                                        setTaskDragData(e.dataTransfer, t.id)
+                                        const dragTaskIds = prepareTaskDragSelection(t.id)
+                                        setTaskDragData(e.dataTransfer, t.id, dragTaskIds)
                                         setTaskDragPreview(e.dataTransfer, e.currentTarget, e.clientX, e.clientY)
                                       }}
                                       onDragEnd={() => setDragOverDate(null)}
                                       onContextMenu={(e) => openMonthTaskMenu(e, t)}
                                       {...taskTouchContextMenu.bind(`month-unassigned-popup:${t.id}`, ({ x, y }) => openMonthTaskMenuAt(x, y, t))}
+                                      data-task-selectable="true"
+                                      data-task-id={t.id}
 	                                      className={`box-border block w-full select-none overflow-hidden rounded-[8px] px-2 py-1.5 text-left text-[11px] leading-tight active:cursor-grabbing ${
 	                                        flashTaskId === t.id ? 'emma-flash-3' : ''
-	                                      }`}
+	                                      } ${isTaskSelected(t.id) ? 'ring-2 ring-slate-900 ring-offset-1' : ''}`}
                                       style={{
                                         background: bg,
                                         color: textColor,
